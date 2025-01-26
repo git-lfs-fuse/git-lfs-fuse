@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/git-lfs/git-lfs/v3/config"
+	"github.com/git-lfs/git-lfs/v3/lfs"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/spf13/cobra"
@@ -63,7 +65,17 @@ func main() {
 				log.Fatal(err)
 			}
 
-			// TODO disable git lfs checkout hook
+			cfg := config.NewIn(hid, "")
+			lfo := lfs.FilterOptions{
+				GitConfig:  cfg.GitConfig(),
+				Force:      true,
+				Local:      true,
+				SkipSmudge: true,
+			}
+			if err := lfo.Install(); err != nil {
+				log.Fatal(err)
+			}
+
 			pxy, err := fs.NewLoopbackRoot(hid)
 			if err != nil {
 				log.Fatal(err)
