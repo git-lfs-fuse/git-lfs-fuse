@@ -8,12 +8,11 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 )
 
-type FsRoot struct {
-	lbr fs.LoopbackRoot
+type FSNode struct {
+	fs.LoopbackNode
 }
 
-type FSNode struct {
-	*fs.LoopbackNode
+type FSNodeData struct {
 	Ignore bool
 }
 
@@ -144,19 +143,23 @@ func (n *FSNode) CopyFileRange(ctx context.Context, fhIn fs.FileHandle,
 }
 
 func NewGitLFSFuseRoot(rootPath string) (fs.InodeEmbedder, error) {
-	node, err := fs.NewLoopbackRoot(rootPath)
-	if err != nil {
+	var st syscall.Stat_t
+	if err := syscall.Stat(rootPath, &st); err != nil {
 		return nil, err
 	}
-	root := node.(*fs.LoopbackNode).RootData
-	root.NewNode = func(rootData *fs.LoopbackRoot, parent *fs.Inode, name string, st *syscall.Stat_t) fs.InodeEmbedder {
-		var ignore bool
-		for ; parent != nil && !ignore; name, parent = parent.Parent() {
-			if name == ".git" {
-				ignore = true
+
+	root := &fs.LoopbackRoot{
+		Path: rootPath,
+		Dev:  uint64(st.Dev),
+		NewNode: func(rootData *fs.LoopbackRoot, parent *fs.LoopbackNode, name string, st *syscall.Stat_t) fs.InodeEmbedder {
+			node := &FSNode{LoopbackNode: fs.LoopbackNode{RootData: rootData}}
+			if (parent != nil && parent.Metadata != nil && parent.Metadata.(*FSNodeData).Ignore) || name == ".git" {
+				node.Metadata = &FSNodeData{Ignore: true}
 			}
-		}
-		return &FSNode{LoopbackNode: &fs.LoopbackNode{RootData: rootData}, Ignore: ignore}
+			return node
+		},
 	}
-	return &FSNode{LoopbackNode: node.(*fs.LoopbackNode)}, nil
+	rootNode := root.NewNode(root, nil, "", &st)
+	root.RootNode = rootNode
+	return rootNode, nil
 }
