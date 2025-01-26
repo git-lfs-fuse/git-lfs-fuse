@@ -19,7 +19,7 @@ import (
 func main() {
 	log.SetFlags(0)
 
-	var rootCmd = &cobra.Command{
+	var entryCmd = &cobra.Command{
 		Use: "git-lfs-fuse",
 	}
 
@@ -33,48 +33,48 @@ func main() {
 			return nil
 		},
 		Run: func(cmd *cobra.Command, args []string) {
-			dest := strings.TrimSuffix(filepath.Base(args[0]), ".git")
-			base, err := filepath.Abs(".")
+			dst := strings.TrimSuffix(filepath.Base(args[0]), ".git")
+			dir, err := filepath.Abs(".")
 			if len(args) >= 2 {
-				dest = filepath.Base(args[1])
-				base, err = filepath.Abs(filepath.Dir(args[1]))
+				dst = filepath.Base(args[1])
+				dir, err = filepath.Abs(filepath.Dir(args[1]))
 			}
 			if err != nil {
 				log.Fatal(err)
 			}
 
-			root := filepath.Join(base, "."+dest)
+			root := filepath.Join(dir, "."+dst)
 
-			command := exec.Command("git", "clone")
-			cmd.Flags().Visit(func(flag *pflag.Flag) {
-				switch flag.Name {
+			git := exec.Command("git", "clone")
+			cmd.Flags().Visit(func(flg *pflag.Flag) {
+				switch flg.Name {
 				case "origin", "branch", "depth":
-					command.Args = append(command.Args, fmt.Sprintf("--%s=%s", flag.Name, flag.Value.String()))
+					git.Args = append(git.Args, fmt.Sprintf("--%s=%s", flg.Name, flg.Value.String()))
 				default:
-					command.Args = append(command.Args, fmt.Sprintf("--%s", flag.Name))
+					git.Args = append(git.Args, fmt.Sprintf("--%s", flg.Name))
 				}
 			})
-			command.Args = append(command.Args, "--", args[0], root)
-			command.Stdout = os.Stdout
-			command.Stderr = os.Stderr
-			command.Env = os.Environ()
-			command.Env = append(command.Env, "GIT_LFS_SKIP_SMUDGE=1")
-			if err := command.Run(); err != nil {
+			git.Args = append(git.Args, "--", args[0], root)
+			git.Stdout = os.Stdout
+			git.Stderr = os.Stderr
+			git.Env = os.Environ()
+			git.Env = append(git.Env, "GIT_LFS_SKIP_SMUDGE=1")
+			if err := git.Run(); err != nil {
 				log.Fatal(err)
 			}
 
 			// TODO disable git lfs checkout hook
 
-			loopbackRoot, err := fs.NewLoopbackRoot(root)
+			pxy, err := fs.NewLoopbackRoot(root)
 			if err != nil {
 				log.Fatal(err)
 			}
 
-			mnt := filepath.Join(base, dest)
-			server, err := fs.Mount(mnt, loopbackRoot, &fs.Options{
+			mnt := filepath.Join(dir, dst)
+			svc, err := fs.Mount(mnt, pxy, &fs.Options{
 				MountOptions: fuse.MountOptions{
-					FsName: dest,
-					Name:   dest,
+					FsName: dst,
+					Name:   dst,
 				},
 			})
 			if err != nil {
@@ -82,14 +82,14 @@ func main() {
 			}
 			log.Printf("%s is mounted at %s. Please keep this process running.", args[0], mnt)
 
-			c := make(chan os.Signal, 1)
-			signal.Notify(c, os.Interrupt)
+			sig := make(chan os.Signal, 1)
+			signal.Notify(sig, os.Interrupt)
 			go func() {
-				for err := os.ErrInvalid; err != nil; err = server.Unmount() {
-					<-c
+				for err := os.ErrInvalid; err != nil; err = svc.Unmount() {
+					<-sig
 				}
 			}()
-			server.Wait()
+			svc.Wait()
 		},
 	}
 	mountCmd.Flags().Bool("progress", false, "force progress reporting")
@@ -105,8 +105,8 @@ func main() {
 	mountCmd.Flags().Bool("single-branch", false, "clone only one branch, HEAD or --branch")
 	mountCmd.Flags().Bool("no-tags", false, "don't clone any tags, and make later fetches not to follow them")
 	mountCmd.Flags().Bool("shallow-submodules", false, "any cloned submodules will be shallow")
-	rootCmd.AddCommand(mountCmd)
-	if err := rootCmd.Execute(); err != nil {
+	entryCmd.AddCommand(mountCmd)
+	if err := entryCmd.Execute(); err != nil {
 		log.Fatal(err)
 	}
 }
