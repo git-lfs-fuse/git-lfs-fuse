@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	gitlfsfuse "github.com/git-lfs-fuse/git-lfs-fuse"
 	"github.com/git-lfs/git-lfs/v3/config"
 	"github.com/git-lfs/git-lfs/v3/lfs"
 	"github.com/hanwen/go-fuse/v2/fs"
@@ -63,35 +64,45 @@ func mountRun(cmd *cobra.Command, args []string) {
 	hid := filepath.Join(dir, "."+dst)
 	mnt := filepath.Join(dir, dst)
 
-	git := exec.Command("git", "clone")
-	cmd.Flags().Visit(func(flg *pflag.Flag) {
-		switch flg.Name {
-		case "origin", "branch", "depth":
-			git.Args = append(git.Args, fmt.Sprintf("--%s=%s", flg.Name, flg.Value.String()))
-		default:
-			git.Args = append(git.Args, fmt.Sprintf("--%s", flg.Name))
+	info, err := os.Stat(hid)
+	if os.IsNotExist(err) {
+		err = nil
+	}
+	if err != nil {
+		log.Fatal(err)
+	}
+	if info == nil {
+		git := exec.Command("git", "clone")
+		cmd.Flags().Visit(func(flg *pflag.Flag) {
+			switch flg.Name {
+			case "origin", "branch", "depth":
+				git.Args = append(git.Args, fmt.Sprintf("--%s=%s", flg.Name, flg.Value.String()))
+			default:
+				git.Args = append(git.Args, fmt.Sprintf("--%s", flg.Name))
+			}
+		})
+		git.Args = append(git.Args, "--", args[0], hid)
+		git.Stdout = os.Stdout
+		git.Stderr = os.Stderr
+		git.Env = os.Environ()
+		git.Env = append(git.Env, "GIT_LFS_SKIP_SMUDGE=1")
+		if err := git.Run(); err != nil {
+			log.Fatal(err)
 		}
-	})
-	git.Args = append(git.Args, "--", args[0], hid)
-	git.Stdout = os.Stdout
-	git.Stderr = os.Stderr
-	git.Env = os.Environ()
-	git.Env = append(git.Env, "GIT_LFS_SKIP_SMUDGE=1")
-	if err := git.Run(); err != nil {
-		log.Fatal(err)
+		lfo := lfs.FilterOptions{
+			GitConfig:  config.NewIn(hid, "").GitConfig(),
+			Force:      true,
+			Local:      true,
+			SkipSmudge: true,
+		}
+		if err := lfo.Install(); err != nil {
+			log.Fatal(err)
+		}
+	} else if !info.IsDir() {
+		log.Fatalf("%s is not a directory", hid)
 	}
 
-	lfo := lfs.FilterOptions{
-		GitConfig:  config.NewIn(hid, "").GitConfig(),
-		Force:      true,
-		Local:      true,
-		SkipSmudge: true,
-	}
-	if err := lfo.Install(); err != nil {
-		log.Fatal(err)
-	}
-
-	pxy, err := fs.NewLoopbackRoot(hid)
+	pxy, err := gitlfsfuse.NewGitLFSFuseRoot(hid)
 	if err != nil {
 		log.Fatal(err)
 	}
