@@ -42,8 +42,8 @@ func main() {
 			if err != nil {
 				log.Fatal(err)
 			}
-
-			root := filepath.Join(dir, "."+dst)
+			hid := filepath.Join(dir, "."+dst)
+			mnt := filepath.Join(dir, dst)
 
 			git := exec.Command("git", "clone")
 			cmd.Flags().Visit(func(flg *pflag.Flag) {
@@ -54,7 +54,7 @@ func main() {
 					git.Args = append(git.Args, fmt.Sprintf("--%s", flg.Name))
 				}
 			})
-			git.Args = append(git.Args, "--", args[0], root)
+			git.Args = append(git.Args, "--", args[0], hid)
 			git.Stdout = os.Stdout
 			git.Stderr = os.Stderr
 			git.Env = os.Environ()
@@ -64,13 +64,10 @@ func main() {
 			}
 
 			// TODO disable git lfs checkout hook
-
-			pxy, err := fs.NewLoopbackRoot(root)
+			pxy, err := fs.NewLoopbackRoot(hid)
 			if err != nil {
 				log.Fatal(err)
 			}
-
-			mnt := filepath.Join(dir, dst)
 			svc, err := fs.Mount(mnt, pxy, &fs.Options{
 				MountOptions: fuse.MountOptions{
 					FsName: dst,
