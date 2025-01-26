@@ -9,7 +9,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
@@ -49,8 +48,8 @@ func main() {
 			command := exec.Command("git", "clone")
 			cmd.Flags().Visit(func(flag *pflag.Flag) {
 				switch flag.Name {
-				case "origin", "branch":
-					command.Args = append(command.Args, fmt.Sprintf("--%s=%s", flag.Name, flag.Value))
+				case "origin", "branch", "depth":
+					command.Args = append(command.Args, fmt.Sprintf("--%s=%s", flag.Name, flag.Value.String()))
 				default:
 					command.Args = append(command.Args, fmt.Sprintf("--%s", flag.Name))
 				}
@@ -71,34 +70,25 @@ func main() {
 				log.Fatal(err)
 			}
 
-			opts := &fs.Options{
+			mnt := filepath.Join(base, dest)
+			server, err := fs.Mount(mnt, loopbackRoot, &fs.Options{
 				MountOptions: fuse.MountOptions{
 					FsName: dest,
 					Name:   dest,
 				},
-			}
-
-			mnt := filepath.Join(base, dest)
-
-			server, err := fs.Mount(mnt, loopbackRoot, opts)
+			})
 			if err != nil {
 				log.Fatal(err)
 			}
-			log.Printf("%s is mounted at %s", args[0], mnt)
+			log.Printf("%s is mounted at %s. Please keep this process running.", args[0], mnt)
 
-			c := make(chan os.Signal)
-			signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+			c := make(chan os.Signal, 1)
+			signal.Notify(c, os.Interrupt)
 			go func() {
-				for {
+				for err := os.ErrInvalid; err != nil; err = server.Unmount() {
 					<-c
-					if err := server.Unmount(); err != nil {
-						log.Println(err)
-						continue
-					}
-					return
 				}
 			}()
-
 			server.Wait()
 		},
 	}
@@ -115,9 +105,7 @@ func main() {
 	mountCmd.Flags().Bool("single-branch", false, "clone only one branch, HEAD or --branch")
 	mountCmd.Flags().Bool("no-tags", false, "don't clone any tags, and make later fetches not to follow them")
 	mountCmd.Flags().Bool("shallow-submodules", false, "any cloned submodules will be shallow")
-
 	rootCmd.AddCommand(mountCmd)
-
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatal(err)
 	}
