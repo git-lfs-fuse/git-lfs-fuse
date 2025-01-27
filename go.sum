@@ -9,8 +9,8 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/dpotapov/go-spnego v0.0.0-20220426193508-b7f82e4507db h1:3EIvol92cLWG5m13Me3/LfEtQqr23xzwZCxiWoT5gGE=
 github.com/dpotapov/go-spnego v0.0.0-20220426193508-b7f82e4507db/go.mod h1:AVSs/gZKt1bOd2AhkhbS7Qh56Hv7klde22yXVbwYJhc=
-github.com/git-lfs-fuse/go-fuse/v2 v2.7.4-dev3 h1:86WZSmZIKFeQqmKNFvp/FMA8CYfiPSdl4aqrV65t7GM=
-github.com/git-lfs-fuse/go-fuse/v2 v2.7.4-dev3/go.mod h1:yE6D2PqWwm3CbYRxFXV9xUd8Md5d6NG0WBs5spCswmI=
+github.com/git-lfs-fuse/go-fuse/v2 v2.7.4-dev5 h1:aVkrZb5HedInFOHOXaQuWi5JoUgMzzRymsKRwo4BYbU=
+github.com/git-lfs-fuse/go-fuse/v2 v2.7.4-dev5/go.mod h1:yE6D2PqWwm3CbYRxFXV9xUd8Md5d6NG0WBs5spCswmI=
 github.com/git-lfs/git-lfs/v3 v3.6.1-0.20250114181820-a8bf08074988 h1:EAmBEWWV1rl17mq+7i+XqmU4V/FZ8tvsITziyw5Oakg=
 github.com/git-lfs/git-lfs/v3 v3.6.1-0.20250114181820-a8bf08074988/go.mod h1:0qOq3XbAR247qPfX04Cd+Tspuyq9sV3Q3TEyb7nUjRk=
 github.com/git-lfs/gitobj/v2 v2.1.1 h1:tf/VU6zL1kxa3he+nf6FO/syX+LGkm6WGDsMpfuXV7Q=

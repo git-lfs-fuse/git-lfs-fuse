@@ -71,6 +71,7 @@ func mountRun(cmd *cobra.Command, args []string) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	cfg := config.NewIn(hid, "")
 	if info == nil {
 		git := exec.Command("git", "clone")
 		cmd.Flags().Visit(func(flg *pflag.Flag) {
@@ -90,7 +91,7 @@ func mountRun(cmd *cobra.Command, args []string) {
 			log.Fatal(err)
 		}
 		lfo := lfs.FilterOptions{
-			GitConfig:  config.NewIn(hid, "").GitConfig(),
+			GitConfig:  cfg.GitConfig(),
 			Force:      true,
 			Local:      true,
 			SkipSmudge: true,
@@ -102,7 +103,7 @@ func mountRun(cmd *cobra.Command, args []string) {
 		log.Fatalf("%s is not a directory", hid)
 	}
 
-	pxy, err := gitlfsfuse.NewGitLFSFuseRoot(hid)
+	pxy, err := gitlfsfuse.NewGitLFSFuseRoot(hid, cfg)
 	if err != nil {
 		log.Fatal(err)
 	}
