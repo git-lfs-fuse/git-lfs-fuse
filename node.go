@@ -61,16 +61,12 @@ func (n *FSNode) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno 
 }
 
 func (n *FSNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-	if !n.Metadata.(*FSNodeData).Ignore {
-		defer n.fixAttr(&out.Attr, filepath.Join(n.path(), name))
-	}
+	defer n.fixAttr(&out.Attr, name)
 	return n.LoopbackNode.Lookup(ctx, name, out)
 }
 
 func (n *FSNode) Mknod(ctx context.Context, name string, mode, rdev uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-	if !n.Metadata.(*FSNodeData).Ignore {
-		defer n.fixAttr(&out.Attr, filepath.Join(n.path(), name))
-	}
+	defer n.fixAttr(&out.Attr, name)
 	return n.LoopbackNode.Mknod(ctx, name, mode, rdev, out)
 }
 
@@ -159,23 +155,19 @@ func (n *FSNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 }
 
 func (n *FSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	if f == nil && !n.Metadata.(*FSNodeData).Ignore {
-		defer n.fixAttr(&out.Attr, n.path())
-	} else if f != nil {
-		if _, ok := f.(*RemoteFile); !ok {
-			defer n.fixAttr(&out.Attr, n.path())
-		}
+	if f == nil {
+		defer n.fixAttr(&out.Attr, "")
+	} else if _, ok := f.(*RemoteFile); !ok {
+		defer n.fixAttr(&out.Attr, "")
 	}
 	return n.LoopbackNode.Getattr(ctx, f, out)
 }
 
 func (n *FSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
-	if f == nil && !n.Metadata.(*FSNodeData).Ignore {
-		defer n.fixAttr(&out.Attr, n.path())
-	} else if f != nil {
-		if _, ok := f.(*RemoteFile); !ok {
-			defer n.fixAttr(&out.Attr, n.path())
-		}
+	if f == nil {
+		defer n.fixAttr(&out.Attr, "")
+	} else if _, ok := f.(*RemoteFile); !ok {
+		defer n.fixAttr(&out.Attr, "")
 	}
 	return n.LoopbackNode.Setattr(ctx, f, in, out)
 }
@@ -198,11 +190,11 @@ func (n *FSNode) CopyFileRange(ctx context.Context, fhIn fs.FileHandle,
 	return n.LoopbackNode.CopyFileRange(ctx, fhIn, offIn, out, fhOut, offOut, len, flags)
 }
 
-func (n *FSNode) fixAttr(out *fuse.Attr, path string) {
-	if out.Size >= 1024 {
+func (n *FSNode) fixAttr(out *fuse.Attr, name string) {
+	if n.Metadata.(*FSNodeData).Ignore || out.Size >= 1024 {
 		return
 	}
-	if r, err := os.Open(path); err == nil {
+	if r, err := os.Open(filepath.Join(n.path(), name)); err == nil {
 		if ptr, _ := lfs.DecodePointer(r); ptr != nil {
 			out.Size = uint64(ptr.Size)
 			if out.Blksize != 0 {
