@@ -7,6 +7,7 @@ replace github.com/hanwen/go-fuse/v2 v2.7.3-0.20250116065539-aa9c5164721d => git
 require (
 	github.com/git-lfs/git-lfs/v3 v3.6.1-0.20250114181820-a8bf08074988
 	github.com/hanwen/go-fuse/v2 v2.7.3-0.20250116065539-aa9c5164721d
+	github.com/maypok86/otter v1.2.4
 	github.com/spf13/cobra v1.8.1
 	github.com/spf13/pflag v1.0.5
 )
@@ -14,7 +15,9 @@ require (
 require (
 	github.com/alexbrainman/sspi v0.0.0-20231016080023-1a75b4708caa // indirect
 	github.com/avast/retry-go v3.0.0+incompatible // indirect
+	github.com/dolthub/maphash v0.1.0 // indirect
 	github.com/dpotapov/go-spnego v0.0.0-20220426193508-b7f82e4507db // indirect
+	github.com/gammazero/deque v1.0.0 // indirect
 	github.com/git-lfs/gitobj/v2 v2.1.1 // indirect
 	github.com/git-lfs/go-netrc v0.0.0-20230601124202-e96144b9a966 // indirect
 	github.com/git-lfs/pktline v0.0.0-20230103162542-ca444d533ef1 // indirect

@@ -9,13 +9,14 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 )
 
-func NewRemoteFile(ptr *lfs.Pointer, fd int) *RemoteFile {
-	return &RemoteFile{ptr: ptr, LoopbackFile: fs.LoopbackFile{Fd: fd}}
+func NewRemoteFile(ptr *lfs.Pointer, fn func(ctx context.Context, ptr *lfs.Pointer, buf []byte, off int64) error, fd int) *RemoteFile {
+	return &RemoteFile{ptr: ptr, LoopbackFile: fs.LoopbackFile{Fd: fd}, df: fn}
 }
 
 type RemoteFile struct {
 	fs.LoopbackFile
 	ptr *lfs.Pointer
+	df  func(ctx context.Context, ptr *lfs.Pointer, buf []byte, off int64) error
 }
 
 var _ = (fs.FileHandle)((*RemoteFile)(nil))
@@ -26,14 +27,16 @@ var _ = (fs.FileWriter)((*RemoteFile)(nil))
 var _ = (fs.FileGetlker)((*RemoteFile)(nil))
 var _ = (fs.FileSetlker)((*RemoteFile)(nil))
 var _ = (fs.FileSetlkwer)((*RemoteFile)(nil))
-var _ = (fs.FileLseeker)((*RemoteFile)(nil))
 var _ = (fs.FileFlusher)((*RemoteFile)(nil))
 var _ = (fs.FileFsyncer)((*RemoteFile)(nil))
 var _ = (fs.FileSetattrer)((*RemoteFile)(nil))
 var _ = (fs.FileAllocater)((*RemoteFile)(nil))
 
 func (f *RemoteFile) Read(ctx context.Context, buf []byte, off int64) (res fuse.ReadResult, errno syscall.Errno) {
-	return f.LoopbackFile.Read(ctx, buf, off)
+	if err := f.df(ctx, f.ptr, buf, off); err != nil {
+		return nil, fs.ToErrno(err)
+	}
+	return fuse.ReadResultData(buf), fs.OK
 }
 
 func (f *RemoteFile) Write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
@@ -64,16 +67,21 @@ func (f *RemoteFile) Setlkw(ctx context.Context, owner uint64, lk *fuse.FileLock
 	return f.LoopbackFile.Setlkw(ctx, owner, lk, flags)
 }
 
+func (f *RemoteFile) fixAttr(out *fuse.AttrOut) {
+	out.Size = uint64(f.ptr.Size)
+	if out.Blksize != 0 {
+		out.Blocks = (out.Size + uint64(out.Blksize) - 1) / uint64(out.Blksize)
+	}
+}
+
 func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
+	defer f.fixAttr(out)
 	return f.LoopbackFile.Setattr(ctx, in, out)
 }
 
 func (f *RemoteFile) Getattr(ctx context.Context, a *fuse.AttrOut) syscall.Errno {
+	defer f.fixAttr(a)
 	return f.LoopbackFile.Getattr(ctx, a)
-}
-
-func (f *RemoteFile) Lseek(ctx context.Context, off uint64, whence uint32) (uint64, syscall.Errno) {
-	return f.LoopbackFile.Lseek(ctx, off, whence)
 }
 
 func (f *RemoteFile) Allocate(ctx context.Context, off uint64, sz uint64, mode uint32) syscall.Errno {
