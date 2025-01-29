@@ -47,6 +47,10 @@ var _ = (fs.NodeLinker)((*FSNode)(nil))
 var _ = (fs.NodeReadlinker)((*FSNode)(nil))
 var _ = (fs.NodeOpener)((*FSNode)(nil))
 var _ = (fs.NodeReader)((*FSNode)(nil))
+var _ = (fs.NodeWriter)((*FSNode)(nil))
+var _ = (fs.NodeFsyncer)((*FSNode)(nil))
+var _ = (fs.NodeFlusher)((*FSNode)(nil))
+var _ = (fs.NodeReleaser)((*FSNode)(nil))
 var _ = (fs.NodeOpendirHandler)((*FSNode)(nil))
 var _ = (fs.NodeReaddirer)((*FSNode)(nil))
 var _ = (fs.NodeGetattrer)((*FSNode)(nil))
@@ -54,6 +58,7 @@ var _ = (fs.NodeSetattrer)((*FSNode)(nil))
 var _ = (fs.NodeGetxattrer)((*FSNode)(nil))
 var _ = (fs.NodeSetxattrer)((*FSNode)(nil))
 var _ = (fs.NodeRemovexattrer)((*FSNode)(nil))
+var _ = (fs.NodeListxattrer)((*FSNode)(nil))
 var _ = (fs.NodeCopyFileRanger)((*FSNode)(nil))
 
 func (n *FSNode) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
@@ -137,13 +142,48 @@ func (n *FSNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuse
 }
 
 func (n *FSNode) Read(ctx context.Context, f fs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
-	if f == nil {
-		return nil, fs.ToErrno(errors.New("f is nil " + n.path()))
-	}
-	if reader, ok := f.(fs.FileReader); ok {
-		return reader.Read(ctx, dest, off)
+	if f != nil {
+		if reader, ok := f.(fs.FileReader); ok {
+			return reader.Read(ctx, dest, off)
+		}
 	}
 	return nil, fs.ToErrno(errors.New("f is not a FileReader " + n.path()))
+}
+
+func (n *FSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, off int64) (written uint32, errno syscall.Errno) {
+	if f != nil {
+		if writer, ok := f.(fs.FileWriter); ok {
+			return writer.Write(ctx, data, off)
+		}
+	}
+	return 0, fs.ToErrno(errors.New("f is not a FileWriter " + n.path()))
+}
+
+func (n *FSNode) Fsync(ctx context.Context, f fs.FileHandle, flags uint32) syscall.Errno {
+	if f != nil {
+		if writer, ok := f.(fs.FileFsyncer); ok {
+			return writer.Fsync(ctx, flags)
+		}
+	}
+	return fs.ToErrno(errors.New("f is not a FileFsyncer " + n.path()))
+}
+
+func (n *FSNode) Flush(ctx context.Context, f fs.FileHandle) syscall.Errno {
+	if f != nil {
+		if writer, ok := f.(fs.FileFlusher); ok {
+			return writer.Flush(ctx)
+		}
+	}
+	return fs.ToErrno(errors.New("f is not a FileFlusher " + n.path()))
+}
+
+func (n *FSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
+	if f != nil {
+		if writer, ok := f.(fs.FileReleaser); ok {
+			return writer.Release(ctx)
+		}
+	}
+	return fs.ToErrno(errors.New("f is not a FileReleaser " + n.path()))
 }
 
 func (n *FSNode) OpendirHandle(ctx context.Context, flags uint32) (fs.FileHandle, uint32, syscall.Errno) {
@@ -182,6 +222,10 @@ func (n *FSNode) Setxattr(ctx context.Context, attr string, data []byte, flags u
 
 func (n *FSNode) Removexattr(ctx context.Context, attr string) syscall.Errno {
 	return n.LoopbackNode.Removexattr(ctx, attr)
+}
+
+func (n *FSNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscall.Errno) {
+	return n.LoopbackNode.Listxattr(ctx, dest)
 }
 
 func (n *FSNode) CopyFileRange(ctx context.Context, fhIn fs.FileHandle,
