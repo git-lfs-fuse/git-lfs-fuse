@@ -262,6 +262,12 @@ func (n *FSNode) path() string {
 
 const chunksize = 4 * 1024 * 1024
 
+type CachedTransferAction struct {
+	Href          string
+	Header        map[string]string
+	Authenticated bool
+}
+
 func NewGitLFSFuseRoot(rootPath string, cfg *config.Configuration) (fs.InodeEmbedder, error) {
 	var st syscall.Stat_t
 	if err := syscall.Stat(rootPath, &st); err != nil {
@@ -286,8 +292,8 @@ func NewGitLFSFuseRoot(rootPath string, cfg *config.Configuration) (fs.InodeEmbe
 		return err
 	}
 
-	hrefs, err := otter.MustBuilder[string, string](10_000).
-		Cost(func(key string, value string) uint32 { return 1 }).
+	transfers, err := otter.MustBuilder[string, CachedTransferAction](10_000).
+		Cost(func(key string, t CachedTransferAction) uint32 { return 1 }).
 		WithVariableTTL().
 		Build()
 	if err != nil {
@@ -316,7 +322,7 @@ func NewGitLFSFuseRoot(rootPath string, cfg *config.Configuration) (fs.InodeEmbe
 				return err
 			}
 
-			href, ok := hrefs.Get(ptr.Oid)
+			ct, ok := transfers.Get(ptr.Oid)
 			if !ok {
 				br, err := tq.Batch(manifest, tq.Download, cfg.Remote(), gref, []*tq.Transfer{{Oid: ptr.Oid, Size: ptr.Size}})
 				if err != nil {
@@ -325,26 +331,48 @@ func NewGitLFSFuseRoot(rootPath string, cfg *config.Configuration) (fs.InodeEmbe
 				if len(br.Objects) == 0 {
 					return errors.New("no objects found")
 				}
-				rel, err := br.Objects[0].Rel("download")
-				if err != nil {
-					return err
+				transfer := *br.Objects[0]
+				if transfer.Error != nil {
+					return transfer.Error
 				}
-				href = rel.Href
-				if !rel.ExpiresAt.IsZero() {
-					hrefs.Set(ptr.Oid, href, time.Since(rel.ExpiresAt))
-				} else if rel.ExpiresIn > 0 {
-					hrefs.Set(ptr.Oid, href, time.Duration(rel.ExpiresIn)*time.Second)
+				action := transfer.Actions["download"]
+				if action == nil {
+					action = transfer.Links["download"]
+				}
+				if action == nil {
+					return errors.New("no download action found")
+				}
+				ct = CachedTransferAction{
+					Href:          action.Href,
+					Header:        action.Header,
+					Authenticated: transfer.Authenticated,
+				}
+				if action.ExpiresIn > 0 {
+					transfers.Set(ptr.Oid, ct, time.Duration(action.ExpiresIn)*time.Second)
+				} else if !action.ExpiresAt.IsZero() {
+					transfers.Set(ptr.Oid, ct, action.ExpiresAt.Sub(time.Now()))
 				} else {
-					hrefs.Set(ptr.Oid, href, time.Minute*5)
+					transfers.Set(ptr.Oid, ct, time.Minute*5)
 				}
 			}
-			req, err := http.NewRequestWithContext(ctx, "GET", href, nil)
+			req, err := http.NewRequestWithContext(ctx, "GET", ct.Href, nil)
 			if err != nil {
 				return err
 			}
-			download := func(chunkFile *os.File, req *http.Request, chunkOff, chunkEnd int64) (int64, time.Duration, error) {
+			for header, value := range ct.Header {
+				req.Header.Add(header, value)
+			}
+			download := func(ct CachedTransferAction, chunkFile *os.File, req *http.Request, chunkOff, chunkEnd int64) (int64, time.Duration, error) {
 				req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", chunkOff, chunkEnd-1))
-				resp, err := client.DoAPIRequestWithAuth(cfg.Remote(), req)
+
+				var err error
+				var resp *http.Response
+
+				if ct.Authenticated {
+					resp, err = client.Do(req)
+				} else {
+					resp, err = client.DoAPIRequestWithAuth(cfg.Remote(), req)
+				}
 				if err != nil {
 					return 0, 0, err
 				}
@@ -384,7 +412,7 @@ func NewGitLFSFuseRoot(rootPath string, cfg *config.Configuration) (fs.InodeEmbe
 				return resp.ContentLength, 0, nil
 			}
 			for downloadOff := chunkOff; downloadOff != chunkEnd; {
-				n, dur, err := download(chunkFile, req, downloadOff, chunkEnd)
+				n, dur, err := download(ct, chunkFile, req, downloadOff, chunkEnd)
 				if err != nil {
 					_ = chunkFile.Close()
 					_ = os.Remove(chunkFile.Name())
