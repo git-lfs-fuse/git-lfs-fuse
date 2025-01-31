@@ -2,17 +2,9 @@ package gitlfsfuse
 
 import (
 	"context"
-	errstd "errors"
-	"fmt"
-	"io"
-	"log"
-	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"syscall"
-	"time"
 
 	"github.com/git-lfs/git-lfs/v3/config"
 	"github.com/git-lfs/git-lfs/v3/errors"
@@ -29,9 +21,8 @@ type FSNode struct {
 }
 
 type FSNodeData struct {
-	DownloadFn func(dst string, ptr *lfs.Pointer) error
-	DownloadRn func(ctx context.Context, ptr *lfs.Pointer, buf []byte, off int64) error
-	Ignore     bool
+	NewRemoteFile func(ptr *lfs.Pointer, fd int) *RemoteFile
+	Ignore        bool
 }
 
 var _ = (fs.NodeStatfser)((*FSNode)(nil))
@@ -109,7 +100,9 @@ func (n *FSNode) Readlink(ctx context.Context) ([]byte, syscall.Errno) {
 
 func (n *FSNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
 	metadata := n.LoopbackNode.Metadata.(*FSNodeData)
-	if metadata.Ignore || flags&uint32(os.O_CREATE) == uint32(os.O_CREATE) {
+	if metadata.Ignore ||
+		flags&uint32(os.O_CREATE) == uint32(os.O_CREATE) ||
+		flags&uint32(os.O_TRUNC) == uint32(os.O_TRUNC) {
 		return n.LoopbackNode.Open(ctx, flags)
 	}
 
@@ -120,25 +113,11 @@ func (n *FSNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuse
 		return n.LoopbackNode.Open(ctx, flags)
 	}
 
-	if flags&uint32(os.O_RDONLY) != uint32(os.O_RDONLY) {
-		if err := metadata.DownloadFn(p, ptr); err != nil {
-			w, err := os.Create(p)
-			if err != nil {
-				return nil, 0, fs.ToErrno(err)
-			}
-			_, err = lfs.EncodePointer(w, ptr)
-			_ = w.Close()
-			return nil, 0, fs.ToErrno(err)
-		}
-		return n.LoopbackNode.Open(ctx, flags)
-	}
-
 	f, err := syscall.Open(p, int(flags), 0)
 	if err != nil {
 		return nil, 0, fs.ToErrno(err)
 	}
-	lf := NewRemoteFile(ptr, metadata.DownloadRn, f)
-	return lf, 0, 0
+	return metadata.NewRemoteFile(ptr, f), 0, 0
 }
 
 func (n *FSNode) Read(ctx context.Context, f fs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
@@ -260,14 +239,6 @@ func (n *FSNode) path() string {
 	return filepath.Join(n.RootData.Path, n.Path(n.root()))
 }
 
-const chunksize = 4 * 1024 * 1024
-
-type CachedTransferAction struct {
-	Href          string
-	Header        map[string]string
-	Authenticated bool
-}
-
 func NewGitLFSFuseRoot(rootPath string, cfg *config.Configuration) (fs.InodeEmbedder, error) {
 	var st syscall.Stat_t
 	if err := syscall.Stat(rootPath, &st); err != nil {
@@ -284,183 +255,32 @@ func NewGitLFSFuseRoot(rootPath string, cfg *config.Configuration) (fs.InodeEmbe
 	manifest := tq.NewManifest(cfg.Filesystem(), client, "download", cfg.Remote())
 	manifest.Upgrade()
 
-	downloadFn := func(dst string, ptr *lfs.Pointer) error {
-		err := gf.SmudgeToFile(dst, ptr, true, manifest, nil)
-		if err != nil {
-			log.Println(err)
-		}
-		return err
-	}
-
-	transfers, err := otter.MustBuilder[string, CachedTransferAction](10_000).
-		Cost(func(key string, t CachedTransferAction) uint32 { return 1 }).
+	actions, err := otter.MustBuilder[string, action](10_000).
+		Cost(func(key string, t action) uint32 { return 1 }).
 		WithVariableTTL().
 		Build()
 	if err != nil {
 		panic(err)
 	}
 
-	chunksRoot := filepath.Join(rootPath, ".git", "fuse")
+	pr := filepath.Join(rootPath, ".git", "fuse")
 
-	downloadRn := func(ctx context.Context, ptr *lfs.Pointer, buf []byte, off int64) error {
-	next:
-		chunk := off / chunksize
-		chunkOff := chunk * chunksize
-		chunkEnd := chunkOff + chunksize
-		chunkStr := strconv.Itoa(int(chunk))
-		if chunkEnd > ptr.Size {
-			chunkEnd = ptr.Size
-		}
+	pf := &PageFetcher{
+		remote:    cfg.Remote(),
+		actions:   &actions,
+		remoteRef: gref,
+		manifest:  manifest,
+	}
 
-		chunkFile, err := os.Open(filepath.Join(chunksRoot, ptr.Oid, chunkStr))
-		if errstd.Is(err, os.ErrNotExist) {
-			if err := os.MkdirAll(filepath.Join(chunksRoot, ptr.Oid), 0755); err != nil {
-				return err
-			}
-			chunkFile, err = os.Create(filepath.Join(chunksRoot, ptr.Oid, chunkStr))
-			if err != nil {
-				return err
-			}
-
-			ct, ok := transfers.Get(ptr.Oid)
-			if !ok {
-				br, err := tq.Batch(manifest, tq.Download, cfg.Remote(), gref, []*tq.Transfer{{Oid: ptr.Oid, Size: ptr.Size}})
-				if err != nil {
-					return err
-				}
-				if len(br.Objects) == 0 {
-					return errors.New("no objects found")
-				}
-				transfer := *br.Objects[0]
-				if transfer.Error != nil {
-					return transfer.Error
-				}
-				action := transfer.Actions["download"]
-				if action == nil {
-					action = transfer.Links["download"]
-				}
-				if action == nil {
-					return errors.New("no download action found")
-				}
-				ct = CachedTransferAction{
-					Href:          action.Href,
-					Header:        action.Header,
-					Authenticated: transfer.Authenticated,
-				}
-				if action.ExpiresIn > 0 {
-					transfers.Set(ptr.Oid, ct, time.Duration(action.ExpiresIn)*time.Second)
-				} else if !action.ExpiresAt.IsZero() {
-					transfers.Set(ptr.Oid, ct, action.ExpiresAt.Sub(time.Now()))
-				} else {
-					transfers.Set(ptr.Oid, ct, time.Minute*5)
-				}
-			}
-			req, err := http.NewRequestWithContext(ctx, "GET", ct.Href, nil)
-			if err != nil {
-				return err
-			}
-			for header, value := range ct.Header {
-				req.Header.Add(header, value)
-			}
-			download := func(ct CachedTransferAction, chunkFile *os.File, req *http.Request, chunkOff, chunkEnd int64) (int64, time.Duration, error) {
-				req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", chunkOff, chunkEnd-1))
-
-				var err error
-				var resp *http.Response
-
-				if ct.Authenticated {
-					resp, err = client.Do(req)
-				} else {
-					resp, err = client.DoAPIRequestWithAuth(cfg.Remote(), req)
-				}
-				if err != nil {
-					return 0, 0, err
-				}
-				defer func() {
-					_, _ = io.Copy(io.Discard, resp.Body)
-					_ = resp.Body.Close()
-				}()
-				if resp.StatusCode == http.StatusTooManyRequests {
-					retryAfter := resp.Header.Get("Retry-After")
-					if seconds, err := strconv.Atoi(retryAfter); err == nil {
-						return 0, time.Duration(seconds) * time.Second, nil
-					}
-					if date, err := time.Parse(time.RFC1123, retryAfter); err == nil {
-						return 0, time.Until(date), nil
-					}
-					return 0, time.Second, nil
-				}
-				if resp.StatusCode != http.StatusPartialContent {
-					return 0, 0, errors.New("unexpected status code: " + resp.Status)
-				}
-				rangeHdr := resp.Header.Get("Content-Range")
-				regex := regexp.MustCompile(`bytes (\d+)\-.*`)
-				match := regex.FindStringSubmatch(rangeHdr)
-				if len(match) < 2 {
-					return 0, 0, fmt.Errorf("badly formatted Content-Range header: %q", rangeHdr)
-				}
-				if contentStart, _ := strconv.ParseInt(match[1], 10, 64); contentStart != chunkOff {
-					return 0, 0, fmt.Errorf("Content-Range start byte incorrect: %s expected %d", match[1], chunkOff)
-				}
-				if _, err := io.CopyN(chunkFile, resp.Body, resp.ContentLength); err != nil {
-					return 0, 0, err
-				}
-				if err := chunkFile.Sync(); err != nil {
-					return 0, 0, err
-				}
-				log.Printf("download: oid=(%s) size=(%s) %6.2f%% err=%v", ptr.Oid, humanReadableSize(ptr.Size), float64(chunkOff+resp.ContentLength)*100/float64(ptr.Size), err)
-				return resp.ContentLength, 0, nil
-			}
-			for downloadOff := chunkOff; downloadOff != chunkEnd; {
-				n, dur, err := download(ct, chunkFile, req, downloadOff, chunkEnd)
-				if err != nil {
-					_ = chunkFile.Close()
-					_ = os.Remove(chunkFile.Name())
-					return err
-				}
-				if dur > 0 {
-					time.Sleep(dur)
-					continue
-				}
-				downloadOff += n
-			}
-			if _, err = chunkFile.Seek(0, io.SeekStart); err != nil {
-				_ = chunkFile.Close()
-				return err
-			}
-		}
-		if err != nil {
-			return err
-		}
-
-		if shift := off - chunkOff; shift > 0 {
-			if _, err := chunkFile.Seek(shift, io.SeekStart); err != nil {
-				_ = chunkFile.Close()
-				return err
-			}
-		}
-		n, err := io.ReadFull(chunkFile, buf[:min(int64(len(buf)), chunkEnd-off)])
-		if err != nil {
-			_ = chunkFile.Close()
-			return err
-		}
-		if n < len(buf) {
-			buf = buf[n:]
-			off += int64(n)
-			if off < ptr.Size {
-				_ = chunkFile.Close()
-				goto next
-			}
-		}
-		_ = chunkFile.Close()
-		return nil
+	newRemoteFile := func(ptr *lfs.Pointer, fd int) *RemoteFile {
+		return NewRemoteFile(ptr, pf, pr, fd)
 	}
 
 	root := &fs.LoopbackRoot{
 		Path: rootPath,
 		Dev:  uint64(st.Dev),
 		NewNode: func(rootData *fs.LoopbackRoot, parent *fs.LoopbackNode, name string, st *syscall.Stat_t) fs.InodeEmbedder {
-			node := &FSNode{LoopbackNode: fs.LoopbackNode{RootData: rootData, Metadata: &FSNodeData{DownloadFn: downloadFn, DownloadRn: downloadRn}}}
+			node := &FSNode{LoopbackNode: fs.LoopbackNode{RootData: rootData, Metadata: &FSNodeData{NewRemoteFile: newRemoteFile}}}
 			if (parent != nil && parent.Metadata.(*FSNodeData).Ignore) || name == ".git" {
 				node.Metadata.(*FSNodeData).Ignore = true
 			}
@@ -470,17 +290,4 @@ func NewGitLFSFuseRoot(rootPath string, cfg *config.Configuration) (fs.InodeEmbe
 	rootNode := root.NewNode(root, nil, "", &st)
 	root.RootNode = rootNode
 	return rootNode, nil
-}
-
-func humanReadableSize(bytes int64) string {
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%d B", bytes)
-	}
-	div, exp := int64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }

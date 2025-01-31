@@ -2,6 +2,11 @@ package gitlfsfuse
 
 import (
 	"context"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
+	"strconv"
 	"syscall"
 
 	"github.com/git-lfs/git-lfs/v3/lfs"
@@ -9,14 +14,15 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 )
 
-func NewRemoteFile(ptr *lfs.Pointer, fn func(ctx context.Context, ptr *lfs.Pointer, buf []byte, off int64) error, fd int) *RemoteFile {
-	return &RemoteFile{ptr: ptr, LoopbackFile: fs.LoopbackFile{Fd: fd}, df: fn}
+func NewRemoteFile(ptr *lfs.Pointer, pf *PageFetcher, pr string, fd int) *RemoteFile {
+	return &RemoteFile{ptr: ptr, pf: pf, pr: pr, LoopbackFile: fs.LoopbackFile{Fd: fd}}
 }
 
 type RemoteFile struct {
 	fs.LoopbackFile
 	ptr *lfs.Pointer
-	df  func(ctx context.Context, ptr *lfs.Pointer, buf []byte, off int64) error
+	pf  *PageFetcher
+	pr  string
 }
 
 var _ = (fs.FileHandle)((*RemoteFile)(nil))
@@ -32,15 +38,84 @@ var _ = (fs.FileFsyncer)((*RemoteFile)(nil))
 var _ = (fs.FileSetattrer)((*RemoteFile)(nil))
 var _ = (fs.FileAllocater)((*RemoteFile)(nil))
 
-func (f *RemoteFile) Read(ctx context.Context, buf []byte, off int64) (res fuse.ReadResult, errno syscall.Errno) {
-	if err := f.df(ctx, f.ptr, buf, off); err != nil {
-		return nil, fs.ToErrno(err)
+const pagesize = 4 * 1024 * 1024
+
+func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, error) {
+	pageNum := off / pagesize
+	pageOff := pageNum * pagesize
+	pageStr := strconv.Itoa(int(pageNum))
+	pfn := filepath.Join(f.pr, f.ptr.Oid, pageStr)
+	page, err := os.Open(pfn)
+	if errors.Is(err, os.ErrNotExist) {
+		if err = os.MkdirAll(filepath.Join(f.pr, f.ptr.Oid), 0755); err != nil {
+			return nil, 0, err
+		}
+		page, err = os.Create(pfn)
+		if err != nil {
+			return nil, 0, err
+		}
+		if pageOff < f.ptr.Size {
+			pageEnd := pageOff + pagesize
+			if pageEnd > f.ptr.Size {
+				pageEnd = f.ptr.Size
+			}
+			if err = f.pf.Fetch(ctx, page, f.ptr, pageOff, pageEnd); err != nil {
+				_ = page.Close()
+				_ = os.Remove(pfn)
+				return nil, 0, err
+			}
+		}
 	}
-	return fuse.ReadResultData(buf), fs.OK
+	return page, pageOff, nil
 }
 
-func (f *RemoteFile) Write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
-	return f.LoopbackFile.Write(ctx, data, off)
+func (f *RemoteFile) Read(ctx context.Context, buf []byte, off int64) (res fuse.ReadResult, errno syscall.Errno) {
+	var readn int
+	var bufbk = buf
+next:
+	page, pageOff, err := f.getPage(ctx, off)
+	if err != nil {
+		return fuse.ReadResultData(bufbk[:readn]), fs.ToErrno(err)
+	}
+	n, err := page.ReadAt(buf, off-pageOff)
+	readn += n
+	if readn == len(bufbk) || off+int64(n) >= f.ptr.Size {
+		_ = page.Close()
+		return fuse.ReadResultData(bufbk[:readn]), fs.OK
+	}
+	if errors.Is(err, io.EOF) {
+		buf = buf[n:]
+		off += int64(n)
+		_ = page.Close()
+		goto next
+	}
+	_ = page.Close()
+	return fuse.ReadResultData(bufbk[:readn]), fs.ToErrno(err)
+}
+
+func (f *RemoteFile) Write(ctx context.Context, buf []byte, off int64) (uint32, syscall.Errno) {
+	var wn int
+	var en = len(buf)
+next:
+	page, pageOff, err := f.getPage(ctx, off)
+	if err != nil {
+		return 0, fs.ToErrno(err)
+	}
+	n, err := page.WriteAt(buf[:min(off+int64(len(buf)), pageOff+pagesize)-off], off-pageOff)
+	if err != nil {
+		_ = page.Close()
+		return 0, fs.ToErrno(err)
+	}
+	if wn += n; wn < en {
+		buf = buf[n:]
+		off += int64(n)
+		_ = page.Close()
+		goto next
+	}
+	if size := off + int64(wn); size > f.ptr.Size {
+		f.ptr.Size = size
+	}
+	return uint32(wn), fs.OK
 }
 
 func (f *RemoteFile) Release(ctx context.Context) syscall.Errno {
