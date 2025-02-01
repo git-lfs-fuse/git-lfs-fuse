@@ -158,6 +158,8 @@ func (f *RemoteFile) fixAttr(out *fuse.AttrOut) {
 }
 
 func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	defer f.fixAttr(out)
 	bs := []byte(f.ptr.Encoded())
 	in.Size = uint64(len(bs))
@@ -169,6 +171,8 @@ func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 }
 
 func (f *RemoteFile) Getattr(ctx context.Context, a *fuse.AttrOut) syscall.Errno {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	defer f.fixAttr(a)
 	return f.LoopbackFile.Getattr(ctx, a)
 }
