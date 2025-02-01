@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"syscall"
 
 	"github.com/git-lfs/git-lfs/v3/lfs"
@@ -19,10 +20,11 @@ func NewRemoteFile(ptr *lfs.Pointer, pf *PageFetcher, pr string, fd int) *Remote
 }
 
 type RemoteFile struct {
-	fs.LoopbackFile
 	ptr *lfs.Pointer
 	pf  *PageFetcher
 	pr  string
+	mu  sync.RWMutex
+	fs.LoopbackFile
 }
 
 var _ = (fs.FileHandle)((*RemoteFile)(nil))
@@ -70,6 +72,9 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, e
 }
 
 func (f *RemoteFile) Read(ctx context.Context, buf []byte, off int64) (res fuse.ReadResult, errno syscall.Errno) {
+	f.mu.RUnlock()
+	defer f.mu.RLock()
+
 	var readn int
 	var bufbk = buf
 next:
@@ -94,6 +99,9 @@ next:
 }
 
 func (f *RemoteFile) Write(ctx context.Context, buf []byte, off int64) (uint32, syscall.Errno) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
 	var wn int
 	var en = len(buf)
 next:
