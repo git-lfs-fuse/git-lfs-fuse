@@ -39,9 +39,10 @@ var _ = (fs.FileSetlkwer)((*RemoteFile)(nil))
 var _ = (fs.FileFlusher)((*RemoteFile)(nil))
 var _ = (fs.FileFsyncer)((*RemoteFile)(nil))
 var _ = (fs.FileSetattrer)((*RemoteFile)(nil))
-var _ = (fs.FileAllocater)((*RemoteFile)(nil))
 
-//var _ = (fs.FileLseeker)((*RemoteFile)(nil)) TODO: we may need to implement the FileLseeker.
+// TODO: we may need to implement these:
+//var _ = (fs.FileAllocater)((*RemoteFile)(nil))
+//var _ = (fs.FileLseeker)((*RemoteFile)(nil))
 
 const pagesize = 2 * 1024 * 1024
 
@@ -215,8 +216,4 @@ func (f *RemoteFile) Getattr(ctx context.Context, a *fuse.AttrOut) syscall.Errno
 	defer f.mu.RUnlock()
 	defer f.fixAttr(a)
 	return f.LoopbackFile.Getattr(ctx, a)
-}
-
-func (f *RemoteFile) Allocate(ctx context.Context, off uint64, sz uint64, mode uint32) syscall.Errno {
-	return f.LoopbackFile.Allocate(ctx, off, sz, mode)
 }
