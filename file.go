@@ -40,7 +40,9 @@ var _ = (fs.FileFsyncer)((*RemoteFile)(nil))
 var _ = (fs.FileSetattrer)((*RemoteFile)(nil))
 var _ = (fs.FileAllocater)((*RemoteFile)(nil))
 
-const pagesize = 4 * 1024 * 1024
+//var _ = (fs.FileLseeker)((*RemoteFile)(nil)) TODO: we may need to implement the FileLseeker.
+
+const pagesize = 2 * 1024 * 1024
 
 func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, error) {
 	pageNum := off / pagesize
