@@ -16,13 +16,14 @@ import (
 )
 
 func NewRemoteFile(ptr *lfs.Pointer, pf *PageFetcher, pr string, fd int) *RemoteFile {
-	return &RemoteFile{ptr: ptr, pf: pf, pr: pr, LoopbackFile: fs.LoopbackFile{Fd: fd}}
+	return &RemoteFile{ptr: ptr, pf: pf, pr: filepath.Join(pr, ptr.Oid), tc: ptr.Size, LoopbackFile: fs.LoopbackFile{Fd: fd}}
 }
 
 type RemoteFile struct {
 	ptr *lfs.Pointer
 	pf  *PageFetcher
-	pr  string
+	pr  string // root for pages
+	tc  int64  // keep track of truncate operations. TODO this should be persisted: Custom ptr encode and decode.
 	mu  sync.RWMutex
 	fs.LoopbackFile
 }
@@ -48,20 +49,20 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, e
 	pageNum := off / pagesize
 	pageOff := pageNum * pagesize
 	pageStr := strconv.Itoa(int(pageNum))
-	pfn := filepath.Join(f.pr, f.ptr.Oid, pageStr)
+	pfn := filepath.Join(f.pr, pageStr)
 	page, err := os.Open(pfn)
 	if errors.Is(err, os.ErrNotExist) {
-		if err = os.MkdirAll(filepath.Join(f.pr, f.ptr.Oid), 0755); err != nil {
+		if err = os.MkdirAll(f.pr, 0755); err != nil {
 			return nil, 0, err
 		}
 		page, err = os.Create(pfn)
 		if err != nil {
 			return nil, 0, err
 		}
-		if pageOff < f.ptr.Size {
+		if pageOff < f.tc {
 			pageEnd := pageOff + pagesize
-			if pageEnd > f.ptr.Size {
-				pageEnd = f.ptr.Size
+			if pageEnd > f.tc {
+				pageEnd = f.tc
 			}
 			if err = f.pf.Fetch(ctx, page, f.ptr, pageOff, pageEnd); err != nil {
 				_ = page.Close()
@@ -163,6 +164,43 @@ func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	defer f.fixAttr(out)
+
+	if ns := int64(in.Size); ns < f.ptr.Size { // truncate operation
+		// wipe out affected range
+		pages, err := os.ReadDir(f.pr)
+		if errors.Is(err, os.ErrNotExist) {
+			err = nil
+		}
+		if err != nil {
+			return fs.ToErrno(err)
+		}
+		for _, p := range pages {
+			if p.IsDir() {
+				continue
+			}
+			pageNum, err := strconv.ParseInt(p.Name(), 10, 64)
+			if err != nil {
+				continue
+			}
+			if pageNum*pagesize >= ns {
+				if err := os.Remove(p.Name()); err != nil {
+					return fs.ToErrno(err)
+				}
+			} else if pn := ns / pagesize; pn == pageNum {
+				pf, err := os.OpenFile(p.Name(), os.O_RDWR, 0666)
+				if err != nil {
+					return fs.ToErrno(err)
+				}
+				err = pf.Truncate(ns - pn*pagesize)
+				pf.Close()
+				if err != nil {
+					return fs.ToErrno(err)
+				}
+			}
+		}
+		f.tc = min(f.tc, ns)
+	}
+	f.ptr.Size = int64(in.Size)
 	bs := []byte(f.ptr.Encoded())
 	in.Size = uint64(len(bs))
 	n, err := f.LoopbackFile.Write(ctx, bs, 0)
