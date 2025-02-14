@@ -82,8 +82,8 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, e
 }
 
 func (f *RemoteFile) Read(ctx context.Context, buf []byte, off int64) (res fuse.ReadResult, errno syscall.Errno) {
-	f.mu.RUnlock()
-	defer f.mu.RLock()
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 
 	var readn int
 	var bufbk = buf
