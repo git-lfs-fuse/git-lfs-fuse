@@ -16,14 +16,20 @@ import (
 )
 
 func NewRemoteFile(ptr *lfs.Pointer, pf *PageFetcher, pr string, fd int) *RemoteFile {
-	return &RemoteFile{ptr: ptr, pf: pf, pr: filepath.Join(pr, ptr.Oid), tc: ptr.Size, LoopbackFile: fs.LoopbackFile{Fd: fd}}
+	pr = filepath.Join(pr, ptr.Oid)
+	bs, _ := os.ReadFile(filepath.Join(pr, "tc"))
+	tc, err := strconv.ParseInt(string(bs), 10, 64)
+	if err != nil {
+		tc = ptr.Size
+	}
+	return &RemoteFile{ptr: ptr, pf: pf, pr: pr, tc: tc, LoopbackFile: fs.LoopbackFile{Fd: fd}}
 }
 
 type RemoteFile struct {
 	ptr *lfs.Pointer
 	pf  *PageFetcher
 	pr  string // root for pages
-	tc  int64  // keep track of truncate operations. TODO this should be persisted: Custom ptr encode and decode.
+	tc  int64  // keep track of truncate operations. This is persisted to the tc file.
 	mu  sync.RWMutex
 	fs.LoopbackFile
 }
@@ -176,7 +182,7 @@ func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 			return fs.ToErrno(err)
 		}
 		for _, p := range pages {
-			if p.IsDir() {
+			if p.IsDir() || p.Name() == "tc" {
 				continue
 			}
 			pageNum, err := strconv.ParseInt(p.Name(), 10, 64)
@@ -199,7 +205,12 @@ func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 				}
 			}
 		}
-		f.tc = min(f.tc, ns)
+		if ns < f.tc {
+			if err := os.WriteFile(filepath.Join(f.pr, "tc"), []byte(strconv.FormatInt(f.tc, 10)), 0666); err != nil {
+				return fs.ToErrno(err)
+			}
+			f.tc = ns
+		}
 	}
 	f.ptr.Size = int64(in.Size)
 	bs := []byte(f.ptr.Encoded())
