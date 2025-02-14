@@ -23,14 +23,18 @@ type action struct {
 	Authenticated bool
 }
 
-type PageFetcher struct {
+type PageFetcher interface {
+	Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, off, end int64) error
+}
+
+type pageFetcher struct {
 	remote    string
 	actions   *otter.CacheWithVariableTTL[string, action]
 	remoteRef *git.Ref
 	manifest  tq.Manifest
 }
 
-func (p *PageFetcher) getAction(ctx context.Context, ptr *lfs.Pointer) (action, error) {
+func (p *pageFetcher) getAction(ctx context.Context, ptr *lfs.Pointer) (action, error) {
 	a, ok := p.actions.Get(ptr.Oid)
 	if ok {
 		return a, nil
@@ -69,7 +73,7 @@ func (p *PageFetcher) getAction(ctx context.Context, ptr *lfs.Pointer) (action, 
 	return a, nil
 }
 
-func (p *PageFetcher) download(ctx context.Context, w io.Writer, a action, off, end int64) (int64, error) {
+func (p *pageFetcher) download(ctx context.Context, w io.Writer, a action, off, end int64) (int64, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", a.Href, nil)
 	if err != nil {
 		return off, err
@@ -118,7 +122,7 @@ func (p *PageFetcher) download(ctx context.Context, w io.Writer, a action, off, 
 	return off + n, err
 }
 
-func (p *PageFetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, off, end int64) error {
+func (p *pageFetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, off, end int64) error {
 	// TODO: single flight by ptr.Oid+range and make it asyncable.
 	a, err := p.getAction(ctx, ptr)
 	if err != nil {

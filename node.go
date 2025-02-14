@@ -265,7 +265,7 @@ func NewGitLFSFuseRoot(rootPath string, cfg *config.Configuration) (fs.InodeEmbe
 
 	pr := filepath.Join(rootPath, ".git", "fuse")
 
-	pf := &PageFetcher{
+	pf := &pageFetcher{
 		remote:    cfg.Remote(),
 		actions:   &actions,
 		remoteRef: gref,

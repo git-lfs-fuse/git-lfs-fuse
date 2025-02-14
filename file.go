@@ -15,7 +15,7 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 )
 
-func NewRemoteFile(ptr *lfs.Pointer, pf *PageFetcher, pr string, fd int) *RemoteFile {
+func NewRemoteFile(ptr *lfs.Pointer, pf PageFetcher, pr string, fd int) *RemoteFile {
 	pr = filepath.Join(pr, ptr.Oid)
 	bs, _ := os.ReadFile(filepath.Join(pr, "tc"))
 	tc, err := strconv.ParseInt(string(bs), 10, 64)
@@ -27,7 +27,7 @@ func NewRemoteFile(ptr *lfs.Pointer, pf *PageFetcher, pr string, fd int) *Remote
 
 type RemoteFile struct {
 	ptr *lfs.Pointer
-	pf  *PageFetcher
+	pf  PageFetcher
 	pr  string // root for pages
 	tc  int64  // keep track of truncate operations. This is persisted to the tc file.
 	mu  sync.RWMutex
