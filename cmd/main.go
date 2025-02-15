@@ -18,6 +18,8 @@ import (
 	"github.com/spf13/pflag"
 )
 
+var directMount bool
+
 func main() {
 	log.SetFlags(0)
 	var entryCmd = &cobra.Command{
@@ -41,6 +43,7 @@ func main() {
 	mountCmd.Flags().Bool("single-branch", false, "clone only one branch, HEAD or --branch")
 	mountCmd.Flags().Bool("no-tags", false, "don't clone any tags, and make later fetches not to follow them")
 	mountCmd.Flags().Bool("shallow-submodules", false, "any cloned submodules will be shallow")
+	mountCmd.Flags().BoolVar(&directMount, "direct-mount", false, "try to call the mount syscall instead of executing fusermount")
 	entryCmd.AddCommand(mountCmd)
 	if err := entryCmd.Execute(); err != nil {
 		log.Fatal(err)
@@ -108,9 +111,11 @@ func mountRun(cmd *cobra.Command, args []string) {
 		log.Fatal(err)
 	}
 	svc, err := fs.Mount(mnt, pxy, &fs.Options{
+		NullPermissions: true, // Leave file permissions on "000" files as-is
 		MountOptions: fuse.MountOptions{
-			FsName: dst,
-			Name:   dst,
+			DirectMount: directMount,
+			FsName:      dst,
+			Name:        "git-lfs",
 		},
 	})
 	if err != nil {
