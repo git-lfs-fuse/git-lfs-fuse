@@ -168,9 +168,6 @@ func (f *RemoteFile) Setlkw(ctx context.Context, owner uint64, lk *fuse.FileLock
 
 func (f *RemoteFile) fixAttr(out *fuse.AttrOut) {
 	out.Size = uint64(f.ptr.Size)
-	if out.Blksize != 0 {
-		out.Blocks = (out.Size + uint64(out.Blksize) - 1) / uint64(out.Blksize)
-	}
 }
 
 func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
