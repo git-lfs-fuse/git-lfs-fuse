@@ -1,16 +1,20 @@
 package gitlfsfuse
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
+	"sort"
 	"syscall"
+	"time"
 
 	"github.com/git-lfs/git-lfs/v3/config"
 	"github.com/git-lfs/git-lfs/v3/errors"
 	"github.com/git-lfs/git-lfs/v3/lfs"
 	"github.com/git-lfs/git-lfs/v3/lfsapi"
 	"github.com/git-lfs/git-lfs/v3/tq"
+	"github.com/go-git/go-git/v5/plumbing/format/index"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/maypok86/otter"
@@ -219,6 +223,32 @@ func (n *FSNode) fixAttr(out *fuse.Attr, name string) {
 	}
 	if r, err := os.Open(filepath.Join(n.path(), name)); err == nil {
 		if ptr, _ := lfs.DecodePointer(r); ptr != nil {
+			move := ""
+			idp := filepath.Join(n.path(), ".git", "index")
+			if f, _ := os.Open(idp); f != nil {
+				idx := index.Index{}
+				if err := index.NewDecoder(f).Decode(&idx); err == nil {
+					i := sort.Search(len(idx.Entries), func(i int) bool {
+						return bytes.Compare([]byte(idx.Entries[i].Name), []byte(name)) >= 0
+					})
+					if i >= 0 && uint64(idx.Entries[i].Size) == out.Size &&
+						idx.Entries[i].CreatedAt.Equal(time.Unix(int64(out.Ctime), int64(out.Ctimensec))) &&
+						idx.Entries[i].ModifiedAt.Equal(time.Unix(int64(out.Mtime), int64(out.Mtimensec))) {
+						idx.Entries[i].Size = uint32(ptr.Size)
+						move = filepath.Join(n.path(), ".git", "index-fuse")
+						if f2, _ := os.Create(move); f2 != nil {
+							if err := index.NewEncoder(f2).Encode(&idx); err != nil {
+								move = ""
+							}
+							_ = f2.Close()
+						}
+					}
+				}
+				_ = f.Close()
+				if move != "" {
+					_ = os.Rename(move, idp)
+				}
+			}
 			out.Size = uint64(ptr.Size)
 		}
 		_ = r.Close()

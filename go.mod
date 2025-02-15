@@ -6,6 +6,7 @@ replace github.com/hanwen/go-fuse/v2 v2.7.3-0.20250116065539-aa9c5164721d => git
 
 require (
 	github.com/git-lfs/git-lfs/v3 v3.6.1-0.20250114181820-a8bf08074988
+	github.com/go-git/go-git/v5 v5.13.2
 	github.com/hanwen/go-fuse/v2 v2.7.3-0.20250116065539-aa9c5164721d
 	github.com/maypok86/otter v1.2.4
 	github.com/spf13/cobra v1.8.1
@@ -34,6 +35,7 @@ require (
 	github.com/leonelquinteros/gotext v1.7.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/olekukonko/ts v0.0.0-20171002115256-78ecb04241c0 // indirect
+	github.com/pjbgf/sha1cd v0.3.2 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/rubyist/tracerx v0.0.0-20170927163412-787959303086 // indirect
 	github.com/ssgelm/cookiejarparser v1.0.1 // indirect
