@@ -57,7 +57,7 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, e
 	pageOff := pageNum * pagesize
 	pageStr := strconv.Itoa(int(pageNum))
 	pfn := filepath.Join(f.pr, pageStr)
-	page, err := os.Open(pfn)
+	page, err := os.OpenFile(pfn, os.O_RDWR, 0666)
 	if errors.Is(err, os.ErrNotExist) {
 		if err = os.MkdirAll(f.pr, 0755); err != nil {
 			return nil, 0, err
@@ -119,7 +119,7 @@ next:
 	if err != nil {
 		return 0, fs.ToErrno(err)
 	}
-	n, err := page.WriteAt(buf[:min(off+int64(len(buf)), pageOff+pagesize)-off], off-pageOff)
+	n, err := page.WriteAt(buf[:min(int64(len(buf)), pageOff+pagesize-off)], off-pageOff)
 	if err != nil {
 		_ = page.Close()
 		return 0, fs.ToErrno(err)
@@ -133,6 +133,7 @@ next:
 	if size := off + int64(wn); size > f.ptr.Size {
 		f.ptr.Size = size
 	}
+	_ = page.Close()
 	return uint32(wn), fs.OK
 }
 
