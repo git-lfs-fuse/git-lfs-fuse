@@ -29,7 +29,7 @@ func (f *fetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, off,
 	return err
 }
 
-func CreateRandomRemoteFile(size int64) (*RemoteFile, func()) {
+func createRandomRemoteFile(size int64) (*RemoteFile, func()) {
 	if size%8 != 0 {
 		panic("size must be a multiple of 8")
 	}
@@ -81,11 +81,21 @@ func CreateRandomRemoteFile(size int64) (*RemoteFile, func()) {
 
 const testsize = 5 * pagesize
 
-func PipeAll(f *RemoteFile, w io.Writer, buf int) (err error) {
+func random(b []byte) {
+	if len(b) != 32 {
+		panic("len(b) != 32")
+	}
+	binary.LittleEndian.PutUint64(b[0:8], rand.Uint64())
+	binary.LittleEndian.PutUint64(b[8:16], rand.Uint64())
+	binary.LittleEndian.PutUint64(b[16:24], rand.Uint64())
+	binary.LittleEndian.PutUint64(b[24:32], rand.Uint64())
+}
+
+func pipe(f *RemoteFile, w io.Writer, buf, beg, end int64) (err error) {
 	b := make([]byte, buf)
-	for i := int64(0); i < f.ptr.Size; i += int64(len(b)) {
-		if i+int64(len(b)) > f.ptr.Size {
-			b = b[:f.ptr.Size-i]
+	for i := beg; i < end; i += int64(len(b)) {
+		if i+int64(len(b)) > end {
+			b = b[:end-i]
 		}
 		_, err = f.Read(context.Background(), b, i)
 		if !errors.Is(err, syscall.Errno(0)) {
@@ -99,11 +109,11 @@ func PipeAll(f *RemoteFile, w io.Writer, buf int) (err error) {
 }
 
 func TestRemoteFile_Read(t *testing.T) {
-	f, cancel := CreateRandomRemoteFile(testsize)
+	f, cancel := createRandomRemoteFile(testsize)
 	defer cancel()
 
 	o := sha256.New()
-	if err := PipeAll(f, o, 1009); err != nil { // intentional prime
+	if err := pipe(f, o, 1009, 0, f.ptr.Size); err != nil { // intentional prime
 		t.Fatalf("Read error: %v", err)
 	}
 	if hex.EncodeToString(o.Sum(nil)) != f.ptr.Oid {
@@ -112,7 +122,7 @@ func TestRemoteFile_Read(t *testing.T) {
 }
 
 func TestRemoteFile_Write_Full(t *testing.T) {
-	f, cancel := CreateRandomRemoteFile(testsize)
+	f, cancel := createRandomRemoteFile(testsize)
 	defer cancel()
 
 	o1 := sha256.New()
@@ -123,17 +133,72 @@ func TestRemoteFile_Write_Full(t *testing.T) {
 		if i+s > testsize {
 			s = testsize - i
 		}
-		binary.LittleEndian.PutUint64(b[0:8], rand.Uint64())
-		binary.LittleEndian.PutUint64(b[8:16], rand.Uint64())
-		binary.LittleEndian.PutUint64(b[16:24], rand.Uint64())
-		binary.LittleEndian.PutUint64(b[24:32], rand.Uint64())
+		random(b)
 		n, err := f.Write(context.Background(), b[:s], int64(i))
 		if !errors.Is(err, syscall.Errno(0)) || n != uint32(s) {
 			t.Fatalf("Write error: %d %v", n, err)
 		}
 		_, _ = o1.Write(b[:s])
 	}
-	if err := PipeAll(f, o2, 1009); err != nil { // intentional prime
+	if err := pipe(f, o2, 10090, 0, f.ptr.Size); err != nil { // intentional prime
+		t.Fatalf("Read error: %v", err)
+	}
+	if !bytes.Equal(o1.Sum(nil), o2.Sum(nil)) {
+		t.Fatalf("oid mismatch")
+	}
+}
+
+func TestRemoteFile_Write_Middle(t *testing.T) {
+	f, cancel := createRandomRemoteFile(testsize)
+	defer cancel()
+
+	o1 := sha256.New()
+	o2 := sha256.New()
+	b := make([]byte, 32)
+	s := 31 // intentional prime
+	if err := pipe(f, o1, 10090, 0, testsize/5); err != nil {
+		t.Fatalf("Read error: %v", err)
+	}
+	i := testsize / 5
+	for ; i < (testsize*3)/5; i += s {
+		random(b)
+		n, err := f.Write(context.Background(), b[:s], int64(i))
+		if !errors.Is(err, syscall.Errno(0)) || n != uint32(s) {
+			t.Fatalf("Write error: %d %v", n, err)
+		}
+		_, _ = o1.Write(b[:s])
+	}
+	if err := pipe(f, o1, 10090, int64(i), testsize); err != nil {
+		t.Fatalf("Read error: %v", err)
+	}
+	if err := pipe(f, o2, 10090, 0, f.ptr.Size); err != nil { // intentional prime
+		t.Fatalf("Read error: %v", err)
+	}
+	if !bytes.Equal(o1.Sum(nil), o2.Sum(nil)) {
+		t.Fatalf("oid mismatch")
+	}
+}
+
+func TestRemoteFile_Write_Append(t *testing.T) {
+	f, cancel := createRandomRemoteFile(testsize)
+	defer cancel()
+
+	o1 := sha256.New()
+	o2 := sha256.New()
+	b := make([]byte, 32)
+	s := 31 // intentional prime
+	if err := pipe(f, o1, 10090, 0, testsize-100); err != nil {
+		t.Fatalf("Read error: %v", err)
+	}
+	for i := testsize - 100; i < testsize+pagesize*3/2; i += s {
+		random(b)
+		n, err := f.Write(context.Background(), b[:s], int64(i))
+		if !errors.Is(err, syscall.Errno(0)) || n != uint32(s) {
+			t.Fatalf("Write error: %d %v", n, err)
+		}
+		_, _ = o1.Write(b[:s])
+	}
+	if err := pipe(f, o2, 10090, 0, f.ptr.Size); err != nil { // intentional prime
 		t.Fatalf("Read error: %v", err)
 	}
 	if !bytes.Equal(o1.Sum(nil), o2.Sum(nil)) {
