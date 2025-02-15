@@ -55,6 +55,10 @@ const pagesize = 2 * 1024 * 1024
 func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, error) {
 	pageNum := off / pagesize
 	pageOff := pageNum * pagesize
+	pageEnd := pageOff + pagesize
+	pageEnd = min(pageEnd, f.ptr.Size)
+	pageEnd = max(pageEnd, pageOff)
+
 	pageStr := strconv.Itoa(int(pageNum))
 	pfn := filepath.Join(f.pr, pageStr)
 	page, err := os.OpenFile(pfn, os.O_RDWR, 0666)
@@ -67,16 +71,17 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, e
 			return nil, 0, err
 		}
 		if pageOff < f.tc {
-			pageEnd := pageOff + pagesize
-			if pageEnd > f.tc {
-				pageEnd = f.tc
-			}
-			if err = f.pf.Fetch(ctx, page, f.ptr, pageOff, pageEnd); err != nil {
+			if err = f.pf.Fetch(ctx, page, f.ptr, pageOff, min(pageEnd, f.tc)); err != nil {
 				_ = page.Close()
 				_ = os.Remove(pfn)
 				return nil, 0, err
 			}
 		}
+	}
+	if err := page.Truncate(pageEnd - pageOff); err != nil {
+		_ = page.Close()
+		_ = os.Remove(pfn)
+		return nil, 0, err
 	}
 	return page, pageOff, nil
 }
@@ -190,12 +195,13 @@ func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 			if err != nil {
 				continue
 			}
+			path := filepath.Join(f.pr, p.Name())
 			if pageNum*pagesize >= ns {
-				if err := os.Remove(p.Name()); err != nil {
+				if err := os.Remove(path); err != nil {
 					return fs.ToErrno(err)
 				}
 			} else if pn := ns / pagesize; pn == pageNum {
-				pf, err := os.OpenFile(p.Name(), os.O_RDWR, 0666)
+				pf, err := os.OpenFile(path, os.O_RDWR, 0666)
 				if err != nil {
 					return fs.ToErrno(err)
 				}

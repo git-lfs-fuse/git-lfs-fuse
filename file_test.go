@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/git-lfs/git-lfs/v3/lfs"
+	"github.com/hanwen/go-fuse/v2/fuse"
 )
 
 type fetcher struct {
@@ -140,7 +141,7 @@ func TestRemoteFile_Write_Full(t *testing.T) {
 		}
 		_, _ = o1.Write(b[:s])
 	}
-	if err := pipe(f, o2, 10090, 0, f.ptr.Size); err != nil { // intentional prime
+	if err := pipe(f, o2, 1009, 0, f.ptr.Size); err != nil { // intentional prime
 		t.Fatalf("Read error: %v", err)
 	}
 	if !bytes.Equal(o1.Sum(nil), o2.Sum(nil)) {
@@ -156,7 +157,7 @@ func TestRemoteFile_Write_Middle(t *testing.T) {
 	o2 := sha256.New()
 	b := make([]byte, 32)
 	s := 31 // intentional prime
-	if err := pipe(f, o1, 10090, 0, testsize/5); err != nil {
+	if err := pipe(f, o1, 1009, 0, testsize/5); err != nil {
 		t.Fatalf("Read error: %v", err)
 	}
 	i := testsize / 5
@@ -168,10 +169,10 @@ func TestRemoteFile_Write_Middle(t *testing.T) {
 		}
 		_, _ = o1.Write(b[:s])
 	}
-	if err := pipe(f, o1, 10090, int64(i), testsize); err != nil {
+	if err := pipe(f, o1, 1009, int64(i), testsize); err != nil {
 		t.Fatalf("Read error: %v", err)
 	}
-	if err := pipe(f, o2, 10090, 0, f.ptr.Size); err != nil { // intentional prime
+	if err := pipe(f, o2, 1009, 0, f.ptr.Size); err != nil { // intentional prime
 		t.Fatalf("Read error: %v", err)
 	}
 	if !bytes.Equal(o1.Sum(nil), o2.Sum(nil)) {
@@ -187,7 +188,7 @@ func TestRemoteFile_Write_Append(t *testing.T) {
 	o2 := sha256.New()
 	b := make([]byte, 32)
 	s := 31 // intentional prime
-	if err := pipe(f, o1, 10090, 0, testsize-100); err != nil {
+	if err := pipe(f, o1, 1009, 0, testsize-100); err != nil {
 		t.Fatalf("Read error: %v", err)
 	}
 	for i := testsize - 100; i < testsize+pagesize*3/2; i += s {
@@ -198,9 +199,74 @@ func TestRemoteFile_Write_Append(t *testing.T) {
 		}
 		_, _ = o1.Write(b[:s])
 	}
-	if err := pipe(f, o2, 10090, 0, f.ptr.Size); err != nil { // intentional prime
+	if err := pipe(f, o2, 1009, 0, f.ptr.Size); err != nil { // intentional prime
 		t.Fatalf("Read error: %v", err)
 	}
+	if !bytes.Equal(o1.Sum(nil), o2.Sum(nil)) {
+		t.Fatalf("oid mismatch")
+	}
+}
+
+func TestRemoteFile_Truncate(t *testing.T) {
+	f, cancel := createRandomRemoteFile(testsize)
+	defer cancel()
+
+	// backup first 100 bytes
+	b := make([]byte, 100)
+	if _, err := f.Read(context.Background(), b, int64(0)); !errors.Is(err, syscall.Errno(0)) {
+		t.Fatalf("Read error: %v", err)
+	}
+	// populate pages
+	if err := pipe(f, io.Discard, 1009, 0, f.ptr.Size); err != nil {
+		t.Fatalf("Read error: %v", err)
+	}
+	attr := &fuse.AttrOut{}
+	if err := f.Getattr(context.Background(), attr); !errors.Is(err, syscall.Errno(0)) {
+		t.Fatalf("Getattr error: %v", err)
+	}
+	if attr.Attr.Size != uint64(f.ptr.Size) {
+		t.Fatalf("attr mismatch")
+	}
+	attrIn := &fuse.SetAttrIn{
+		SetAttrInCommon: fuse.SetAttrInCommon{
+			Size:      attr.Size,
+			Atime:     attr.Atime,
+			Mtime:     attr.Mtime,
+			Ctime:     attr.Ctime,
+			Atimensec: attr.Atimensec,
+			Mtimensec: attr.Mtimensec,
+			Ctimensec: attr.Ctimensec,
+			Mode:      attr.Mode,
+			Owner:     attr.Owner,
+		},
+	}
+	// truncate to 100
+	attrIn.Size = 100
+	if err := f.Setattr(context.Background(), attrIn, attr); !errors.Is(err, syscall.Errno(0)) {
+		t.Fatalf("Setattr error: %v", err)
+	}
+	// enlarge
+	attrIn.Size = testsize + 100
+	if err := f.Setattr(context.Background(), attrIn, attr); !errors.Is(err, syscall.Errno(0)) {
+		t.Fatalf("Setattr error: %v", err)
+	}
+	if err := f.Getattr(context.Background(), attr); !errors.Is(err, syscall.Errno(0)) {
+		t.Fatalf("Getattr error: %v", err)
+	}
+	if f.ptr.Size != testsize+100 {
+		t.Fatalf("Size mismatch")
+	}
+
+	o1 := sha256.New()
+	o2 := sha256.New()
+
+	o1.Write(b)
+	o1.Write(make([]byte, testsize))
+
+	if err := pipe(f, o2, 1009, 0, f.ptr.Size); err != nil { // intentional prime
+		t.Fatalf("Read error: %v", err)
+	}
+
 	if !bytes.Equal(o1.Sum(nil), o2.Sum(nil)) {
 		t.Fatalf("oid mismatch")
 	}
