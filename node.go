@@ -3,9 +3,12 @@ package gitlfsfuse
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -317,4 +320,80 @@ func NewGitLFSFuseRoot(rootPath string, cfg *config.Configuration) (fs.InodeEmbe
 	rootNode := root.NewNode(root, nil, "", &st)
 	root.RootNode = rootNode
 	return rootNode, nil
+}
+
+type Server struct {
+	svc *fuse.Server
+}
+
+func (s *Server) Close() {
+	go func() {
+		for err := s.svc.Unmount(); err != nil; err = s.svc.Unmount() {
+			time.Sleep(time.Millisecond * 500)
+		}
+	}()
+	s.svc.Wait()
+}
+
+func CloneMount(remote, mountPoint string, directMount bool, gitOptions []string) (string, *Server, error) {
+	dst := strings.TrimSuffix(filepath.Base(remote), ".git")
+	dir, err := filepath.Abs(".")
+	if mountPoint != "" {
+		dst = filepath.Base(mountPoint)
+		dir, err = filepath.Abs(filepath.Dir(mountPoint))
+	}
+	if err != nil {
+		return "", nil, err
+	}
+	hid := filepath.Join(dir, "."+dst)
+	mnt := filepath.Join(dir, dst)
+
+	info, err := os.Stat(hid)
+	if os.IsNotExist(err) {
+		err = nil
+	}
+	if err != nil {
+		return "", nil, err
+	}
+	cfg := config.NewIn(hid, "")
+	if info == nil {
+		git := exec.Command("git", "clone")
+		git.Args = append(git.Args, gitOptions...)
+		git.Args = append(git.Args, "--", remote, hid)
+		git.Stdout = os.Stdout
+		git.Stderr = os.Stderr
+		git.Env = os.Environ()
+		git.Env = append(git.Env, "GIT_LFS_SKIP_SMUDGE=1")
+		if err := git.Run(); err != nil {
+			return "", nil, err
+		}
+		lfo := lfs.FilterOptions{
+			GitConfig:  cfg.GitConfig(),
+			Force:      true,
+			Local:      true,
+			SkipSmudge: true,
+		}
+		if err := lfo.Install(); err != nil {
+			return "", nil, err
+		}
+	} else if !info.IsDir() {
+		return "", nil, fmt.Errorf("%s is not a directory", hid)
+	}
+
+	pxy, err := NewGitLFSFuseRoot(hid, cfg)
+	if err != nil {
+		return "", nil, err
+	}
+	svc, err := fs.Mount(mnt, pxy, &fs.Options{
+		NullPermissions: true, // Leave file permissions on "000" files as-is
+		MountOptions: fuse.MountOptions{
+			DirectMount: directMount,
+			FsName:      dst,
+			Name:        "git-lfs",
+		},
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	return mnt, &Server{svc: svc}, nil
 }

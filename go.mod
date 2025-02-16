@@ -5,6 +5,7 @@ go 1.23.4
 replace github.com/hanwen/go-fuse/v2 v2.7.3-0.20250116065539-aa9c5164721d => github.com/git-lfs-fuse/go-fuse/v2 v2.7.4-dev7
 
 require (
+	github.com/git-lfs-fuse/lfs-test-server v0.5.0-dev4
 	github.com/git-lfs/git-lfs/v3 v3.6.1-0.20250114181820-a8bf08074988
 	github.com/go-git/go-git/v5 v5.13.2
 	github.com/hanwen/go-fuse/v2 v2.7.3-0.20250116065539-aa9c5164721d
@@ -16,6 +17,7 @@ require (
 require (
 	github.com/alexbrainman/sspi v0.0.0-20231016080023-1a75b4708caa // indirect
 	github.com/avast/retry-go v3.0.0+incompatible // indirect
+	github.com/boltdb/bolt v1.3.1 // indirect
 	github.com/dolthub/maphash v0.1.0 // indirect
 	github.com/dpotapov/go-spnego v0.0.0-20220426193508-b7f82e4507db // indirect
 	github.com/gammazero/deque v1.0.0 // indirect
@@ -23,6 +25,8 @@ require (
 	github.com/git-lfs/go-netrc v0.0.0-20230601124202-e96144b9a966 // indirect
 	github.com/git-lfs/pktline v0.0.0-20230103162542-ca444d533ef1 // indirect
 	github.com/git-lfs/wildmatch/v2 v2.0.1 // indirect
+	github.com/gorilla/context v1.1.2 // indirect
+	github.com/gorilla/mux v1.8.1 // indirect
 	github.com/hashicorp/go-uuid v1.0.3 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jcmturner/aescts/v2 v2.0.0 // indirect
@@ -41,6 +45,6 @@ require (
 	github.com/ssgelm/cookiejarparser v1.0.1 // indirect
 	golang.org/x/crypto v0.32.0 // indirect
 	golang.org/x/net v0.34.0 // indirect
-	golang.org/x/sys v0.29.0 // indirect
+	golang.org/x/sys v0.30.0 // indirect
 	golang.org/x/text v0.21.0 // indirect
 )
