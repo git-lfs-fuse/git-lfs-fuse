@@ -17,8 +17,8 @@ github.com/dpotapov/go-spnego v0.0.0-20220426193508-b7f82e4507db h1:3EIvol92cLWG
 github.com/dpotapov/go-spnego v0.0.0-20220426193508-b7f82e4507db/go.mod h1:AVSs/gZKt1bOd2AhkhbS7Qh56Hv7klde22yXVbwYJhc=
 github.com/gammazero/deque v1.0.0 h1:LTmimT8H7bXkkCy6gZX7zNLtkbz4NdS2z8LZuor3j34=
 github.com/gammazero/deque v1.0.0/go.mod h1:iflpYvtGfM3U8S8j+sZEKIak3SAKYpA5/SQewgfXDKo=
-github.com/git-lfs-fuse/go-fuse/v2 v2.7.4-dev7 h1:BRWCrd+R9Q/+hInnAuAlrp04RH4YrFcGzzZd3Suy0rA=
-github.com/git-lfs-fuse/go-fuse/v2 v2.7.4-dev7/go.mod h1:yE6D2PqWwm3CbYRxFXV9xUd8Md5d6NG0WBs5spCswmI=
+github.com/git-lfs-fuse/go-fuse/v2 v2.7.4-dev8 h1:LIynuOT2meJvQspvpscN+t9UI9DnxF832f6DxYy+hzU=
+github.com/git-lfs-fuse/go-fuse/v2 v2.7.4-dev8/go.mod h1:yE6D2PqWwm3CbYRxFXV9xUd8Md5d6NG0WBs5spCswmI=
 github.com/git-lfs-fuse/lfs-test-server v0.5.0-dev4 h1:wVofXtW6mYheolLBtsmVouS21YeADXxif+cZj1mgAP8=
 github.com/git-lfs-fuse/lfs-test-server v0.5.0-dev4/go.mod h1:1oTZ+ZWyURmcCK9xfhrUKSKiP8bjPycLOwYL+R1l3OA=
 github.com/git-lfs/git-lfs/v3 v3.6.1-0.20250114181820-a8bf08074988 h1:EAmBEWWV1rl17mq+7i+XqmU4V/FZ8tvsITziyw5Oakg=
