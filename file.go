@@ -63,6 +63,7 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, e
 	pfn := filepath.Join(f.pr, pageStr)
 	page, err := os.OpenFile(pfn, os.O_RDWR, 0666)
 	if errors.Is(err, os.ErrNotExist) {
+		// TODO: try os.Create first, and then try os.MkdirAll if os.Create fails.
 		if err = os.MkdirAll(f.pr, 0755); err != nil {
 			return nil, 0, err
 		}
