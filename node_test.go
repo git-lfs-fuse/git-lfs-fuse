@@ -1,6 +1,8 @@
 package gitlfsfuse
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"net"
 	"os"
 	"os/exec"
@@ -156,7 +158,7 @@ func prepareRepo() (r *repository, err error) {
 	return r, nil
 }
 
-func cloneMount(t *testing.T) (repo string, cancel func()) {
+func cloneMount(t *testing.T) (hid, repo string, cancel func()) {
 	var r *repository
 	var mnt string
 	var svc *Server
@@ -188,7 +190,7 @@ func cloneMount(t *testing.T) (repo string, cancel func()) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, svc, err = CloneMount(r.repo, filepath.Join(mnt, "repo"), false, nil)
+	hid, repo, svc, err = CloneMount(r.repo, filepath.Join(mnt, "repo"), false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +198,43 @@ func cloneMount(t *testing.T) (repo string, cancel func()) {
 }
 
 func TestMount(t *testing.T) {
-	repo, cancel := cloneMount(t)
+	hid, mnt, cancel := cloneMount(t)
 	defer cancel()
-	t.Log(repo)
+
+	fi1, err := os.Stat(filepath.Join(hid, "emptylarge.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fi2, err := os.Stat(filepath.Join(mnt, "emptylarge.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi1.Name() != fi2.Name() {
+		t.Errorf("fi doesn't match")
+	}
+	if fi1.Mode() != fi2.Mode() {
+		t.Errorf("fi doesn't match")
+	}
+	if fi1.IsDir() != fi2.IsDir() {
+		t.Errorf("fi doesn't match")
+	}
+	if fi1.ModTime() != fi2.ModTime() {
+		t.Errorf("fi doesn't match")
+	}
+	ptr, err := lfs.DecodePointerFromFile(filepath.Join(hid, "emptylarge.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi2.Size() != ptr.Size {
+		t.Errorf("fi doesn't match")
+	}
+	o := sha256.New()
+	bytes, err := os.ReadFile(filepath.Join(mnt, "emptylarge.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.Write(bytes)
+	if ptr.Oid != hex.EncodeToString(o.Sum(nil)) {
+		t.Errorf("oid doesn't match")
+	}
 }

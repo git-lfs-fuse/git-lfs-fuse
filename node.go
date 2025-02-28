@@ -335,7 +335,7 @@ func (s *Server) Close() {
 	s.svc.Wait()
 }
 
-func CloneMount(remote, mountPoint string, directMount bool, gitOptions []string) (string, *Server, error) {
+func CloneMount(remote, mountPoint string, directMount bool, gitOptions []string) (string, string, *Server, error) {
 	dst := strings.TrimSuffix(filepath.Base(remote), ".git")
 	dir, err := filepath.Abs(".")
 	if mountPoint != "" {
@@ -343,7 +343,7 @@ func CloneMount(remote, mountPoint string, directMount bool, gitOptions []string
 		dir, err = filepath.Abs(filepath.Dir(mountPoint))
 	}
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 	hid := filepath.Join(dir, "."+dst)
 	mnt := filepath.Join(dir, dst)
@@ -353,7 +353,7 @@ func CloneMount(remote, mountPoint string, directMount bool, gitOptions []string
 		err = nil
 	}
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 	cfg := config.NewIn(hid, "")
 	if info == nil {
@@ -365,7 +365,7 @@ func CloneMount(remote, mountPoint string, directMount bool, gitOptions []string
 		git.Env = os.Environ()
 		git.Env = append(git.Env, "GIT_LFS_SKIP_SMUDGE=1")
 		if err := git.Run(); err != nil {
-			return "", nil, err
+			return "", "", nil, err
 		}
 		lfo := lfs.FilterOptions{
 			GitConfig:  cfg.GitConfig(),
@@ -374,15 +374,15 @@ func CloneMount(remote, mountPoint string, directMount bool, gitOptions []string
 			SkipSmudge: true,
 		}
 		if err := lfo.Install(); err != nil {
-			return "", nil, err
+			return "", "", nil, err
 		}
 	} else if !info.IsDir() {
-		return "", nil, fmt.Errorf("%s is not a directory", hid)
+		return "", "", nil, fmt.Errorf("%s is not a directory", hid)
 	}
 
 	pxy, err := NewGitLFSFuseRoot(hid, cfg)
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 	svc, err := fs.Mount(mnt, pxy, &fs.Options{
 		NullPermissions: true, // Leave file permissions on "000" files as-is
@@ -393,7 +393,7 @@ func CloneMount(remote, mountPoint string, directMount bool, gitOptions []string
 		},
 	})
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
-	return mnt, &Server{svc: svc}, nil
+	return hid, mnt, &Server{svc: svc}, nil
 }

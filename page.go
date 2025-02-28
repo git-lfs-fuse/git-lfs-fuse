@@ -118,7 +118,7 @@ func (p *pageFetcher) download(ctx context.Context, w io.Writer, a action, off, 
 	if contentStart, _ := strconv.ParseInt(match[1], 10, 64); contentStart != off {
 		return off, fmt.Errorf("Content-Range start byte incorrect: %s expected %d", match[1], off)
 	}
-	n, err := io.CopyN(w, resp.Body, resp.ContentLength)
+	n, err := io.Copy(w, resp.Body)
 	return off + n, err
 }
 

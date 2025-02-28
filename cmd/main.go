@@ -60,7 +60,7 @@ func mountRun(cmd *cobra.Command, args []string) {
 			gitOptions = append(gitOptions, fmt.Sprintf("--%s", flg.Name))
 		}
 	})
-	mnt, svc, err := gitlfsfuse.CloneMount(args[0], mountPoint, directMount, gitOptions)
+	_, mnt, svc, err := gitlfsfuse.CloneMount(args[0], mountPoint, directMount, gitOptions)
 	if err != nil {
 		log.Fatal(err)
 	}
