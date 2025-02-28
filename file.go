@@ -78,6 +78,7 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, e
 			}
 		}
 	}
+	// TODO: remove this truncate by making sure all pages are the same size.
 	if err := page.Truncate(pageEnd - pageOff); err != nil {
 		_ = page.Close()
 		_ = os.Remove(pfn)
