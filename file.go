@@ -73,6 +73,7 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, e
 		}
 		if pageOff < f.tc {
 			if err = f.pf.Fetch(ctx, page, f.ptr, pageOff, min(pageEnd, f.tc)); err != nil {
+				// TODO: handle ptr not found error
 				_ = page.Close()
 				_ = os.Remove(pfn)
 				return nil, 0, err
