@@ -11,6 +11,8 @@ import (
 	"io"
 	"math/rand/v2"
 	"os"
+	"path/filepath"
+	"strconv"
 	"syscall"
 	"testing"
 
@@ -269,5 +271,39 @@ func TestRemoteFile_Truncate(t *testing.T) {
 
 	if !bytes.Equal(o1.Sum(nil), o2.Sum(nil)) {
 		t.Fatalf("oid mismatch")
+	}
+}
+
+func TestRemoteFile_TruncateClose(t *testing.T) {
+	f, cancel := createRandomRemoteFile(testsize)
+	defer cancel()
+
+	attr := &fuse.AttrOut{}
+	if err := f.Getattr(context.Background(), attr); !errors.Is(err, syscall.Errno(0)) {
+		t.Fatalf("Getattr error: %v", err)
+	}
+	attrIn := &fuse.SetAttrIn{
+		SetAttrInCommon: fuse.SetAttrInCommon{
+			Size:      attr.Size,
+			Atime:     attr.Atime,
+			Mtime:     attr.Mtime,
+			Ctime:     attr.Ctime,
+			Atimensec: attr.Atimensec,
+			Mtimensec: attr.Mtimensec,
+			Ctimensec: attr.Ctimensec,
+			Mode:      attr.Mode,
+			Owner:     attr.Owner,
+		},
+	}
+	// truncate to 100
+	attrIn.Size = 100
+	if err := f.Setattr(context.Background(), attrIn, attr); !errors.Is(err, syscall.Errno(0)) {
+		t.Fatalf("Setattr error: %v", err)
+	}
+
+	bs, _ := os.ReadFile(filepath.Join(f.pr, "tc"))
+	tc, err := strconv.ParseInt(string(bs), 10, 64)
+	if err != nil || tc != 100 {
+		t.Fatalf("incorrect tc on disk: %v %v", tc, err)
 	}
 }

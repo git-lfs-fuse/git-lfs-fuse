@@ -182,7 +182,7 @@ func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 		// wipe out affected range
 		pages, err := os.ReadDir(f.pr)
 		if errors.Is(err, os.ErrNotExist) {
-			err = nil
+			err = os.MkdirAll(f.pr, 0755)
 		}
 		if err != nil {
 			return fs.ToErrno(err)
