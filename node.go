@@ -226,6 +226,7 @@ func (n *FSNode) fixAttr(out *fuse.Attr, name string) {
 	}
 	if r, err := os.Open(filepath.Join(n.path(), name)); err == nil {
 		if ptr, _ := lfs.DecodePointer(r); ptr != nil {
+			// TODO: move this step to a custom smudge filter
 			move := ""
 			idp := filepath.Join(n.path(), ".git", "index")
 			if f, _ := os.Open(idp); f != nil {
