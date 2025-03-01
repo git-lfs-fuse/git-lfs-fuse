@@ -3,7 +3,6 @@ package gitlfsfuse
 import (
 	"context"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -52,7 +51,7 @@ var _ = (fs.FileSetattrer)((*RemoteFile)(nil))
 
 const pagesize = 2 * 1024 * 1024
 
-func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, error) {
+func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, int64, error) {
 	pageNum := off / pagesize
 	pageOff := pageNum * pagesize
 	pageEnd := pageOff + pagesize
@@ -63,30 +62,31 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, e
 	pfn := filepath.Join(f.pr, pageStr)
 	page, err := os.OpenFile(pfn, os.O_RDWR, 0666)
 	if errors.Is(err, os.ErrNotExist) {
-		// TODO: try os.Create first, and then try os.MkdirAll if os.Create fails.
-		if err = os.MkdirAll(f.pr, 0755); err != nil {
-			return nil, 0, err
-		}
 		page, err = os.Create(pfn)
+		if errors.Is(err, os.ErrNotExist) {
+			if err = os.MkdirAll(f.pr, 0755); err == nil {
+				page, err = os.Create(pfn)
+			}
+		}
 		if err != nil {
-			return nil, 0, err
+			return nil, 0, 0, err
 		}
 		if pageOff < f.tc {
 			if err = f.pf.Fetch(ctx, page, f.ptr, pageOff, min(pageEnd, f.tc)); err != nil {
 				// TODO: handle ptr not found error
 				_ = page.Close()
 				_ = os.Remove(pfn)
-				return nil, 0, err
+				return nil, 0, 0, err
 			}
 		}
+		// make sure every page has the same size.
+		if err := page.Truncate(pagesize); err != nil {
+			_ = page.Close()
+			_ = os.Remove(pfn)
+			return nil, 0, 0, err
+		}
 	}
-	// TODO: remove this truncate by making sure all pages are the same size.
-	if err := page.Truncate(pageEnd - pageOff); err != nil {
-		_ = page.Close()
-		_ = os.Remove(pfn)
-		return nil, 0, err
-	}
-	return page, pageOff, nil
+	return page, pageOff, pageEnd - pageOff, nil
 }
 
 func (f *RemoteFile) Read(ctx context.Context, buf []byte, off int64) (res fuse.ReadResult, errno syscall.Errno) {
@@ -96,17 +96,18 @@ func (f *RemoteFile) Read(ctx context.Context, buf []byte, off int64) (res fuse.
 	var readn int
 	var bufbk = buf
 next:
-	page, pageOff, err := f.getPage(ctx, off)
+	page, pageOff, size, err := f.getPage(ctx, off)
 	if err != nil {
 		return fuse.ReadResultData(bufbk[:readn]), fs.ToErrno(err)
 	}
-	n, err := page.ReadAt(buf, off-pageOff)
+	shiftOff := off - pageOff
+	n, err := page.ReadAt(buf[:min(int64(len(buf)), size-shiftOff)], shiftOff)
 	readn += n
 	if readn == len(bufbk) || off+int64(n) >= f.ptr.Size {
 		_ = page.Close()
 		return fuse.ReadResultData(bufbk[:readn]), fs.OK
 	}
-	if errors.Is(err, io.EOF) {
+	if err == nil && n > 0 {
 		buf = buf[n:]
 		off += int64(n)
 		_ = page.Close()
@@ -123,7 +124,7 @@ func (f *RemoteFile) Write(ctx context.Context, buf []byte, off int64) (uint32, 
 	var wn int
 	var en = len(buf)
 next:
-	page, pageOff, err := f.getPage(ctx, off)
+	page, pageOff, _, err := f.getPage(ctx, off)
 	if err != nil {
 		return 0, fs.ToErrno(err)
 	}
@@ -206,6 +207,7 @@ func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 					return fs.ToErrno(err)
 				}
 				err = pf.Truncate(ns - pn*pagesize)
+				err = pf.Truncate(pagesize) // keep the page in the same size.
 				pf.Close()
 				if err != nil {
 					return fs.ToErrno(err)
