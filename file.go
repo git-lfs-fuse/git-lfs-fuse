@@ -213,7 +213,7 @@ func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 			}
 		}
 		if ns < f.tc {
-			if err := os.WriteFile(filepath.Join(f.pr, "tc"), []byte(strconv.FormatInt(f.tc, 10)), 0666); err != nil {
+			if err := os.WriteFile(filepath.Join(f.pr, "tc"), []byte(strconv.FormatInt(ns, 10)), 0666); err != nil {
 				return fs.ToErrno(err)
 			}
 			f.tc = ns
