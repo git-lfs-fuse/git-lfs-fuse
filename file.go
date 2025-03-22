@@ -14,6 +14,19 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 )
 
+func generateFid(path string) (string, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+
+	stat, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return "", errors.New("failed to get inode from fi")
+	}
+	return strconv.FormatUint(stat.Ino, 10), nil
+}
+
 func NewRemoteFile(ptr *lfs.Pointer, pf PageFetcher, pr string, fd int) *RemoteFile {
 	pr = filepath.Join(pr, ptr.Oid)
 	bs, _ := os.ReadFile(filepath.Join(pr, "tc"))
