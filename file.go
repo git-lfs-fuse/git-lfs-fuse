@@ -27,19 +27,27 @@ func generateFid(path string) (string, error) {
 	return strconv.FormatUint(stat.Ino, 10), nil
 }
 
-func NewRemoteFile(ptr *lfs.Pointer, pf PageFetcher, pr string, fd int) *RemoteFile {
-	pr = filepath.Join(pr, ptr.Oid)
+func NewRemoteFile(ptr *lfs.Pointer, pf PageFetcher, pr string, fd int) (*RemoteFile, error) {
+	fid, err := generateFid(pr)
+	if err != nil {
+		return nil, err
+	}
+
+	ps := filepath.Join(pr, ptr.Oid, "shared")
+	pr = filepath.Join(pr, ptr.Oid, fid)
+
 	bs, _ := os.ReadFile(filepath.Join(pr, "tc"))
 	tc, err := strconv.ParseInt(string(bs), 10, 64)
 	if err != nil {
 		tc = ptr.Size
 	}
-	return &RemoteFile{ptr: ptr, pf: pf, pr: pr, tc: tc, LoopbackFile: fs.LoopbackFile{Fd: fd}}
+	return &RemoteFile{ptr: ptr, pf: pf, ps: ps, pr: pr, tc: tc, LoopbackFile: fs.LoopbackFile{Fd: fd}}, nil
 }
 
 type RemoteFile struct {
 	ptr *lfs.Pointer
 	pf  PageFetcher
+	ps	string
 	pr  string // root for pages
 	tc  int64  // keep track of truncate operations. This is persisted to the tc file.
 	mu  sync.RWMutex
@@ -75,10 +83,21 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, i
 	pfn := filepath.Join(f.pr, pageStr)
 	page, err := os.OpenFile(pfn, os.O_RDWR, 0666)
 	if errors.Is(err, os.ErrNotExist) {
-		page, err = os.Create(pfn)
+		psfn := filepath.Join(f.ps, pageStr)
+		if err := os.Symlink(psfn, pfn); err == nil {
+			page, err = os.OpenFile(pfn, os.O_RDWR, 0666)
+			return page, pageOff, pageEnd - pageOff, err
+		}
+		if err = os.MkdirAll(f.pr, 0755); err == nil {
+			if err := os.Symlink(psfn, pfn); err == nil {
+				page, err = os.OpenFile(pfn, os.O_RDWR, 0666)
+				return page, pageOff, pageEnd - pageOff, err
+			}
+		}
+		page, err = os.Create(psfn)
 		if errors.Is(err, os.ErrNotExist) {
-			if err = os.MkdirAll(f.pr, 0755); err == nil {
-				page, err = os.Create(pfn)
+			if err = os.MkdirAll(f.ps, 0755); err == nil {
+				page, err = os.Create(psfn)
 			}
 		}
 		if err != nil {
@@ -88,14 +107,21 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, i
 			if err = f.pf.Fetch(ctx, page, f.ptr, pageOff, min(pageEnd, f.tc)); err != nil {
 				// TODO: handle ptr not found error
 				_ = page.Close()
-				_ = os.Remove(pfn)
+				_ = os.Remove(psfn)
 				return nil, 0, 0, err
 			}
 		}
 		// make sure every page has the same size.
 		if err := page.Truncate(pagesize); err != nil {
 			_ = page.Close()
-			_ = os.Remove(pfn)
+			_ = os.Remove(psfn)
+			return nil, 0, 0, err
+		}
+		_ = page.Close()
+		if err := os.Symlink(psfn, pfn); err == nil {
+			page, err = os.OpenFile(pfn, os.O_RDWR, 0666)
+		}
+		if err != nil {
 			return nil, 0, 0, err
 		}
 	}
