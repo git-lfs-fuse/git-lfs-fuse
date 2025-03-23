@@ -303,18 +303,19 @@ func NewGitLFSFuseRoot(rootPath string, cfg *config.Configuration) (fs.InodeEmbe
 		manifest:  manifest,
 	}
 
-	newRemoteFile := func(ptr *lfs.Pointer, fd int) (*RemoteFile, error) {
-		return NewRemoteFile(ptr, pf, pr, fd)
+	newRemoteFile := func(ptr *lfs.Pointer, fd int) *RemoteFile {
+		rf, err := NewRemoteFile(ptr, pf, pr, fd)
+		if err != nil {
+			return nil
+		}
+		return rf
 	}
 
 	root := &fs.LoopbackRoot{
 		Path: rootPath,
 		Dev:  uint64(st.Dev),
 		NewNode: func(rootData *fs.LoopbackRoot, parent *fs.LoopbackNode, name string, st *syscall.Stat_t) fs.InodeEmbedder {
-			node := &FSNode{LoopbackNode: fs.LoopbackNode{RootData: rootData, Metadata: &FSNodeData{NewRemoteFile: func(ptr *lfs.Pointer, fd int) *RemoteFile {
-				rf, _ := newRemoteFile(ptr, fd)
-				return rf
-			}}}}
+			node := &FSNode{LoopbackNode: fs.LoopbackNode{RootData: rootData, Metadata: &FSNodeData{NewRemoteFile: newRemoteFile}}}
 			if (parent != nil && parent.Metadata.(*FSNodeData).Ignore) || name == ".git" {
 				node.Metadata.(*FSNodeData).Ignore = true
 			}
