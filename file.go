@@ -3,6 +3,7 @@ package gitlfsfuse
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -128,6 +129,36 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, i
 	return page, pageOff, pageEnd - pageOff, nil
 }
 
+func (f *RemoteFile) getPageforWrite(ctx context.Context, off int64) (*os.File, int64, int64, error) {
+	pageNum := off / pagesize
+	page, pageOff, size, err := f.getPage(ctx, off)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	_ = page.Close()
+	
+	pageStr := strconv.Itoa(int(pageNum))
+	psfn := filepath.Join(f.ps, pageStr)
+	page, err = os.Open(psfn)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	defer page.Close()
+
+	pfn := filepath.Join(f.pr, pageStr)
+	newPage, err := os.Create(pfn)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	
+	if _, err := io.Copy(newPage, page); err != nil {
+		_ = newPage.Close()
+		_ = os.Remove(pfn)
+		return nil, 0, 0, err
+	}
+	return newPage, pageOff, size, nil
+}
+
 func (f *RemoteFile) Read(ctx context.Context, buf []byte, off int64) (res fuse.ReadResult, errno syscall.Errno) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -163,7 +194,7 @@ func (f *RemoteFile) Write(ctx context.Context, buf []byte, off int64) (uint32, 
 	var wn int
 	var en = len(buf)
 next:
-	page, pageOff, _, err := f.getPage(ctx, off)
+	page, pageOff, _, err := f.getPageforWrite(ctx, off)
 	if err != nil {
 		return 0, fs.ToErrno(err)
 	}
