@@ -182,6 +182,9 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, i
 		if pageEnd <= f.tc {
 			if err := os.Symlink(psfn, pfn); err == nil {
 				page, err = os.OpenFile(pfn, os.O_RDWR, 0666)
+				if err != nil {
+					return nil, 0, 0, err
+				}
 			}
 			if err != nil {
 				return nil, 0, 0, err
@@ -322,13 +325,16 @@ func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 	defer f.mu.Unlock()
 	defer f.fixAttr(out)
 
-	tcShared := filepath.Join(f.ps, "tc")
-	if _, err := os.Stat(tcShared); os.IsNotExist(err){
-		if err = os.WriteFile(tcShared, []byte(strconv.FormatInt(f.sz, 10)), 0666); err != nil {
-			return fs.ToErrno(err)
+	if err := os.MkdirAll(f.ps, 0755); err == nil {
+		tcShared := filepath.Join(f.ps, "tc")
+		if _, err := os.Stat(tcShared); os.IsNotExist(err){
+			if err = os.WriteFile(tcShared, []byte(strconv.FormatInt(f.sz, 10)), 0666); err != nil {
+				return fs.ToErrno(err)
+			}
 		}
+	} else {
+		return fs.ToErrno(err)
 	}
-
 	if ns := int64(in.Size); ns < f.ptr.Size { // truncate operation
 		// wipe out affected range
 		pages, err := os.ReadDir(f.pr)

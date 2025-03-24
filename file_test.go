@@ -79,7 +79,11 @@ func createRandomRemoteFile(size int64) (*RemoteFile, func()) {
 	if _, err = ptr.Encode(p); err != nil {
 		clean()
 	}
-	return NewRemoteFile(ptr, &fetcher{f: f}, d, int(p.Fd())), clean
+	file, err := NewRemoteFile(ptr, &fetcher{f: f}, d, int(p.Fd()))
+	if err != nil {
+		panic(err)
+	}
+	return file, clean
 }
 
 const testsize = 5 * pagesize
