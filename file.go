@@ -3,7 +3,6 @@ package gitlfsfuse
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -167,7 +166,6 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, i
 				// TODO: handle ptr not found error
 				_ = page.Close()
 				_ = os.Remove(psfn)
-				fmt.Println(4)
 				return nil, 0, 0, err
 			}
 		}
