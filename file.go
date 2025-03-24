@@ -92,7 +92,14 @@ func (f *RemoteFile) copyPageFromShared(dest, source string) error {
 	}
 	defer sharedFile.Close()
 
-	_ = os.Remove(dest)
+	if info, err := os.Lstat(dest); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			if err := os.Remove(dest); err != nil {
+				return err
+			}
+		}
+	}
+
 	newFile, err := os.Create(dest)
 	if err != nil {
 		return err
