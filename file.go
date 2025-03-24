@@ -47,7 +47,13 @@ func NewRemoteFile(ptr *lfs.Pointer, pf PageFetcher, pr string, fd int) (*Remote
 	if err != nil {
 		tc = ptr.Size
 	}
-	return &RemoteFile{ptr: ptr, pf: pf, ps: ps, pr: pr, tc: tc, LoopbackFile: fs.LoopbackFile{Fd: fd}}, nil
+
+	bs, _ = os.ReadFile(filepath.Join(ps, "tc"))
+	sz, err := strconv.ParseInt(string(bs), 10, 64)
+	if err != nil {
+		sz = ptr.Size
+	}
+	return &RemoteFile{ptr: ptr, pf: pf, ps: ps, pr: pr, tc: tc, sz: sz, LoopbackFile: fs.LoopbackFile{Fd: fd}}, nil
 }
 
 type RemoteFile struct {
@@ -56,6 +62,7 @@ type RemoteFile struct {
 	ps	string // directory of shared pages
 	pr  string // root for pages
 	tc  int64  // keep track of truncate operations. This is persisted to the tc file.
+	sz	int64
 	mu  sync.RWMutex
 	fs.LoopbackFile
 }
@@ -77,6 +84,28 @@ var _ = (fs.FileSetattrer)((*RemoteFile)(nil))
 //var _ = (fs.FileLseeker)((*RemoteFile)(nil))
 
 const pagesize = 2 * 1024 * 1024
+
+func (f *RemoteFile) copyPageFromShared(pageName string) error {
+	sharedPath := filepath.Join(f.ps, pageName)
+	sharedFile, err := os.Open(sharedPath)
+	if err != nil {
+		return err
+	}
+	defer sharedFile.Close()
+
+	destPath := filepath.Join(f.pr, pageName)
+	newFile, err := os.Create(destPath)
+	if err != nil {
+		return err
+	}
+	defer newFile.Close()
+
+	if _, err := io.Copy(newFile, sharedFile); err != nil {
+		_ = os.Remove(destPath)
+		return err
+	}
+	return nil
+}
 
 func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, int64, error) {
 	pageNum := off / pagesize
@@ -109,9 +138,9 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, i
 		if err != nil {
 			return nil, 0, 0, err
 		}
-		// if f.tc != ptr.Size?
+		
 		if pageOff < f.tc {
-			if err = f.pf.Fetch(ctx, page, f.ptr, pageOff, min(pageEnd, f.tc)); err != nil {
+			if err = f.pf.Fetch(ctx, page, f.ptr, pageOff, min(pageEnd, f.sz)); err != nil {
 				// TODO: handle ptr not found error
 				_ = page.Close()
 				_ = os.Remove(psfn)
@@ -125,36 +154,30 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, i
 			return nil, 0, 0, err
 		}
 		_ = page.Close()
-		if err := os.Symlink(psfn, pfn); err == nil {
+
+		if pageEnd <= f.tc {
+			if err := os.Symlink(psfn, pfn); err == nil {
+				page, err = os.OpenFile(pfn, os.O_RDWR, 0666)
+			}
+			if err != nil {
+				return nil, 0, 0, err
+			}
+		} else {
+			if err := f.copyPageFromShared(pageStr); err != nil {
+				return nil, 0, 0, err
+			}
 			page, err = os.OpenFile(pfn, os.O_RDWR, 0666)
-		}
-		if err != nil {
-			return nil, 0, 0, err
+			if err != nil {
+				return nil, 0, 0, err
+			}
+			err = page.Truncate(f.tc - pageOff)
+			err = page.Truncate(pagesize)
+			if err != nil {
+				return nil, 0, 0, err
+			}
 		}
 	}
 	return page, pageOff, pageEnd - pageOff, nil
-}
-
-func (f *RemoteFile) copyPageFromShared(pageName string) error {
-	sharedPath := filepath.Join(f.ps, pageName)
-	sharedFile, err := os.Open(sharedPath)
-	if err != nil {
-		return err
-	}
-	defer sharedFile.Close()
-
-	destPath := filepath.Join(f.pr, pageName)
-	newFile, err := os.Create(destPath)
-	if err != nil {
-		return err
-	}
-	defer newFile.Close()
-
-	if _, err := io.Copy(newFile, sharedFile); err != nil {
-		_ = os.Remove(destPath)
-		return err
-	}
-	return nil
 }
 
 func (f *RemoteFile) getPageForWrite(ctx context.Context, off int64) (*os.File, int64, int64, error) {
@@ -274,6 +297,13 @@ func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 	defer f.mu.Unlock()
 	defer f.fixAttr(out)
 
+	tcShared := filepath.Join(f.ps, "tc")
+	if _, err := os.Stat(tcShared); os.IsNotExist(err){
+		if err = os.WriteFile(tcShared, []byte(strconv.FormatInt(f.sz, 10)), 0666); err != nil {
+			return fs.ToErrno(err)
+		}
+	}
+
 	if ns := int64(in.Size); ns < f.ptr.Size { // truncate operation
 		// wipe out affected range
 		pages, err := os.ReadDir(f.pr)
@@ -307,7 +337,7 @@ func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 				if err != nil {
 					return fs.ToErrno(err)
 				}
-				
+
 				pf, err := os.OpenFile(path, os.O_RDWR, 0666)
 				if err != nil {
 					return fs.ToErrno(err)
