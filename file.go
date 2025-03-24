@@ -28,6 +28,11 @@ func generateFid(path string) (string, error) {
 	return strconv.FormatUint(stat.Ino, 10), nil
 }
 
+// xxx/<Oid>/<fid1>/0 -> xxx/<Oid>/shared/0
+// xxx/<Oid>/<fid2>/0 -> xxx/<Oid>/shared/0
+// if <fid1>/0 modified
+// xxx/<Oid>/<fid1>/0 
+// xxx/<Oid>/<fid2>/0 -> xxx/<Oid>/shared/0
 func NewRemoteFile(ptr *lfs.Pointer, pf PageFetcher, pr string, fd int) (*RemoteFile, error) {
 	fid, err := generateFid(pr)
 	if err != nil {
@@ -48,7 +53,7 @@ func NewRemoteFile(ptr *lfs.Pointer, pf PageFetcher, pr string, fd int) (*Remote
 type RemoteFile struct {
 	ptr *lfs.Pointer
 	pf  PageFetcher
-	ps	string
+	ps	string // directory of shared pages
 	pr  string // root for pages
 	tc  int64  // keep track of truncate operations. This is persisted to the tc file.
 	mu  sync.RWMutex
@@ -104,6 +109,7 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, i
 		if err != nil {
 			return nil, 0, 0, err
 		}
+		// if f.tc != ptr.Size?
 		if pageOff < f.tc {
 			if err = f.pf.Fetch(ctx, page, f.ptr, pageOff, min(pageEnd, f.tc)); err != nil {
 				// TODO: handle ptr not found error
@@ -129,31 +135,50 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, i
 	return page, pageOff, pageEnd - pageOff, nil
 }
 
-func (f *RemoteFile) getPageforWrite(ctx context.Context, off int64) (*os.File, int64, int64, error) {
+func (f *RemoteFile) copyPageFromShared(pageName string) error {
+	sharedPath := filepath.Join(f.ps, pageName)
+	sharedFile, err := os.Open(sharedPath)
+	if err != nil {
+		return err
+	}
+	defer sharedFile.Close()
+
+	destPath := filepath.Join(f.pr, pageName)
+	newFile, err := os.Create(destPath)
+	if err != nil {
+		return err
+	}
+	defer newFile.Close()
+
+	if _, err := io.Copy(newFile, sharedFile); err != nil {
+		_ = os.Remove(destPath)
+		return err
+	}
+	return nil
+}
+
+func (f *RemoteFile) getPageForWrite(ctx context.Context, off int64) (*os.File, int64, int64, error) {
 	pageNum := off / pagesize
 	page, pageOff, size, err := f.getPage(ctx, off)
 	if err != nil {
 		return nil, 0, 0, err
 	}
 	_ = page.Close()
-	
-	pageStr := strconv.Itoa(int(pageNum))
-	psfn := filepath.Join(f.ps, pageStr)
-	page, err = os.Open(psfn)
-	if err != nil {
-		return nil, 0, 0, err
-	}
-	defer page.Close()
 
+	pageStr := strconv.Itoa(int(pageNum))
 	pfn := filepath.Join(f.pr, pageStr)
-	newPage, err := os.Create(pfn)
+	info, err := os.Lstat(pfn)
+	if err == nil && (info.Mode()&os.ModeSymlink != 0) {
+		if err := f.copyPageFromShared(pageStr); err != nil {
+			return nil, 0, 0, err
+		}
+	}
 	if err != nil {
 		return nil, 0, 0, err
 	}
-	
-	if _, err := io.Copy(newPage, page); err != nil {
-		_ = newPage.Close()
-		_ = os.Remove(pfn)
+
+	newPage, err := os.OpenFile(pfn, os.O_RDWR, 0666)
+	if err != nil {
 		return nil, 0, 0, err
 	}
 	return newPage, pageOff, size, nil
@@ -194,7 +219,7 @@ func (f *RemoteFile) Write(ctx context.Context, buf []byte, off int64) (uint32, 
 	var wn int
 	var en = len(buf)
 next:
-	page, pageOff, _, err := f.getPageforWrite(ctx, off)
+	page, pageOff, _, err := f.getPageForWrite(ctx, off)
 	if err != nil {
 		return 0, fs.ToErrno(err)
 	}
@@ -272,6 +297,17 @@ func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 					return fs.ToErrno(err)
 				}
 			} else if pn := ns / pagesize; pn == pageNum {
+				info, err := os.Lstat(path)
+				if err == nil && (info.Mode()&os.ModeSymlink != 0) {
+					// is symlink, copy
+					if err := f.copyPageFromShared(p.Name()); err != nil {
+						return fs.ToErrno(err)
+					}
+				}
+				if err != nil {
+					return fs.ToErrno(err)
+				}
+				
 				pf, err := os.OpenFile(path, os.O_RDWR, 0666)
 				if err != nil {
 					return fs.ToErrno(err)
