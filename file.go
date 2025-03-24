@@ -86,27 +86,30 @@ var _ = (fs.FileSetattrer)((*RemoteFile)(nil))
 const pagesize = 2 * 1024 * 1024
 
 func (f *RemoteFile) copyPageFromShared(dest, source string) error {
-	sharedFile, err := os.Open(source)
-	if err != nil {
-		return err
-	}
-	defer sharedFile.Close()
-
 	if info, err := os.Lstat(dest); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
 			if err := os.Remove(dest); err != nil {
 				return err
 			}
+		} else {
+			// if the file exists and is not a symlink, no copy is needed
+			return nil
 		}
 	}
 
-	newFile, err := os.Create(dest)
+	sharedPage, err := os.Open(source)
 	if err != nil {
 		return err
 	}
-	defer newFile.Close()
+	defer sharedPage.Close()
+	
+	newPage, err := os.Create(dest)
+	if err != nil {
+		return err
+	}
+	defer newPage.Close()
 
-	if _, err := io.Copy(newFile, sharedFile); err != nil {
+	if _, err := io.Copy(newPage, sharedPage); err != nil {
 		_ = os.Remove(dest)
 		return err
 	}
@@ -216,14 +219,7 @@ func (f *RemoteFile) getPageForWrite(ctx context.Context, off int64) (*os.File, 
 
 	pageStr := strconv.Itoa(int(pageNum))
 	pfn := filepath.Join(f.pr, pageStr)
-	
-	info, err := os.Lstat(pfn)
-	if err == nil && (info.Mode()&os.ModeSymlink != 0) {
-		if err := f.copyPageFromShared(pfn, filepath.Join(f.ps, pageStr)); err != nil {
-			return nil, 0, 0, err
-		}
-	}
-	if err != nil {
+	if err := f.copyPageFromShared(pfn, filepath.Join(f.ps, pageStr)); err != nil {
 		return nil, 0, 0, err
 	}
 
@@ -357,13 +353,7 @@ func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 					return fs.ToErrno(err)
 				}
 			} else if pn := ns / pagesize; pn == pageNum {
-				info, err := os.Lstat(path)
-				if err == nil && (info.Mode()&os.ModeSymlink != 0) {
-					if err := f.copyPageFromShared(path, filepath.Join(f.ps, p.Name())); err != nil {
-						return fs.ToErrno(err)
-					}
-				}
-				if err != nil {
+				if err := f.copyPageFromShared(path, filepath.Join(f.ps, p.Name())); err != nil {
 					return fs.ToErrno(err)
 				}
 
