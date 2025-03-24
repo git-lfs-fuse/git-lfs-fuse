@@ -3,6 +3,7 @@ package gitlfsfuse
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -107,6 +108,23 @@ func (f *RemoteFile) copyPageFromShared(pageName string) error {
 	return nil
 }
 
+// make sure symlink exists
+func (f *RemoteFile) ensureSymlink(pageStr string) error {
+    pfn := filepath.Join(f.pr, pageStr)
+    psfn := filepath.Join(f.ps, pageStr)
+
+    if _, err := os.Stat(psfn); err != nil {
+        return err
+    }
+    if err := os.Symlink(psfn, pfn); err == nil {
+        return nil
+    }
+    if err := os.MkdirAll(f.pr, 0755); err != nil {
+        return err
+    }
+    return os.Symlink(psfn, pfn)
+}
+
 func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, int64, error) {
 	pageNum := off / pagesize
 	pageOff := pageNum * pagesize
@@ -116,21 +134,23 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, i
 
 	pageStr := strconv.Itoa(int(pageNum))
 	pfn := filepath.Join(f.pr, pageStr)
+	
 	page, err := os.OpenFile(pfn, os.O_RDWR, 0666)
 	if errors.Is(err, os.ErrNotExist) {
 		// TODO: handle file expansion
 		// if pageNum < f.sz / pagesize {}
 		psfn := filepath.Join(f.ps, pageStr)
-		if err := os.Symlink(psfn, pfn); err == nil {
+		if err := f.ensureSymlink(psfn); err == nil {
 			page, err = os.OpenFile(pfn, os.O_RDWR, 0666)
 			return page, pageOff, pageEnd - pageOff, err
 		}
 		if err = os.MkdirAll(f.pr, 0755); err == nil {
-			if err := os.Symlink(psfn, pfn); err == nil {
+			if err := f.ensureSymlink(psfn); err == nil {
 				page, err = os.OpenFile(pfn, os.O_RDWR, 0666)
 				return page, pageOff, pageEnd - pageOff, err
-			}
+			}		
 		}
+
 		page, err = os.Create(psfn)
 		if errors.Is(err, os.ErrNotExist) {
 			if err = os.MkdirAll(f.ps, 0755); err == nil {
@@ -146,6 +166,7 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, i
 				// TODO: handle ptr not found error
 				_ = page.Close()
 				_ = os.Remove(psfn)
+				fmt.Println(4)
 				return nil, 0, 0, err
 			}
 		}
@@ -218,6 +239,7 @@ func (f *RemoteFile) Read(ctx context.Context, buf []byte, off int64) (res fuse.
 next:
 	page, pageOff, size, err := f.getPage(ctx, off)
 	if err != nil {
+		// fmt.Println(1)
 		return fuse.ReadResultData(bufbk[:readn]), fs.ToErrno(err)
 	}
 	shiftOff := off - pageOff
@@ -225,6 +247,7 @@ next:
 	readn += n
 	if readn == len(bufbk) || off+int64(n) >= f.ptr.Size {
 		_ = page.Close()
+		// fmt.Println(2)
 		return fuse.ReadResultData(bufbk[:readn]), fs.OK
 	}
 	if err == nil && n > 0 {
@@ -234,6 +257,7 @@ next:
 		goto next
 	}
 	_ = page.Close()
+	// fmt.Println(3)
 	return fuse.ReadResultData(bufbk[:readn]), fs.ToErrno(err)
 }
 
@@ -331,7 +355,6 @@ func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 			} else if pn := ns / pagesize; pn == pageNum {
 				info, err := os.Lstat(path)
 				if err == nil && (info.Mode()&os.ModeSymlink != 0) {
-					// is symlink, copy
 					if err := f.copyPageFromShared(p.Name()); err != nil {
 						return fs.ToErrno(err)
 					}
