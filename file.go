@@ -118,6 +118,8 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, i
 	pfn := filepath.Join(f.pr, pageStr)
 	page, err := os.OpenFile(pfn, os.O_RDWR, 0666)
 	if errors.Is(err, os.ErrNotExist) {
+		// TODO: handle file expansion
+		// if pageNum < f.sz / pagesize {}
 		psfn := filepath.Join(f.ps, pageStr)
 		if err := os.Symlink(psfn, pfn); err == nil {
 			page, err = os.OpenFile(pfn, os.O_RDWR, 0666)
