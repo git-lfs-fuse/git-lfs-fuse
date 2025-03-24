@@ -95,6 +95,7 @@ func (f *RemoteFile) copyPageFromShared(pageName string) error {
 	defer sharedFile.Close()
 
 	destPath := filepath.Join(f.pr, pageName)
+	_ = os.Remove(destPath)
 	newFile, err := os.Create(destPath)
 	if err != nil {
 		return err
@@ -213,6 +214,7 @@ func (f *RemoteFile) getPageForWrite(ctx context.Context, off int64) (*os.File, 
 
 	pageStr := strconv.Itoa(int(pageNum))
 	pfn := filepath.Join(f.pr, pageStr)
+	
 	info, err := os.Lstat(pfn)
 	if err == nil && (info.Mode()&os.ModeSymlink != 0) {
 		if err := f.copyPageFromShared(pageStr); err != nil {
@@ -239,7 +241,6 @@ func (f *RemoteFile) Read(ctx context.Context, buf []byte, off int64) (res fuse.
 next:
 	page, pageOff, size, err := f.getPage(ctx, off)
 	if err != nil {
-		// fmt.Println(1)
 		return fuse.ReadResultData(bufbk[:readn]), fs.ToErrno(err)
 	}
 	shiftOff := off - pageOff
@@ -247,7 +248,6 @@ next:
 	readn += n
 	if readn == len(bufbk) || off+int64(n) >= f.ptr.Size {
 		_ = page.Close()
-		// fmt.Println(2)
 		return fuse.ReadResultData(bufbk[:readn]), fs.OK
 	}
 	if err == nil && n > 0 {
@@ -257,7 +257,6 @@ next:
 		goto next
 	}
 	_ = page.Close()
-	// fmt.Println(3)
 	return fuse.ReadResultData(bufbk[:readn]), fs.ToErrno(err)
 }
 
