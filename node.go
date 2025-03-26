@@ -28,7 +28,7 @@ type FSNode struct {
 }
 
 type FSNodeData struct {
-	NewRemoteFile func(ptr *lfs.Pointer, fd int) *RemoteFile
+	NewRemoteFile func(ptr *lfs.Pointer, fd int) (*RemoteFile, error)
 	Ignore        bool
 }
 
@@ -124,7 +124,12 @@ func (n *FSNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuse
 	if err != nil {
 		return nil, 0, fs.ToErrno(err)
 	}
-	return metadata.NewRemoteFile(ptr, f), 0, 0
+
+	file, err := metadata.NewRemoteFile(ptr, f)
+	if err != nil {
+		return nil, 0, fs.ToErrno(err)
+	}
+	return file, 0, 0
 }
 
 func (n *FSNode) Read(ctx context.Context, f fs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
@@ -303,8 +308,12 @@ func NewGitLFSFuseRoot(rootPath string, cfg *config.Configuration) (fs.InodeEmbe
 		manifest:  manifest,
 	}
 
-	newRemoteFile := func(ptr *lfs.Pointer, fd int) *RemoteFile {
-		return NewRemoteFile(ptr, pf, pr, fd)
+	newRemoteFile := func(ptr *lfs.Pointer, fd int) (*RemoteFile, error) {
+		rf, err := NewRemoteFile(ptr, pf, pr, fd)
+		if err != nil {
+			return nil, err
+		}
+		return rf, nil
 	}
 
 	root := &fs.LoopbackRoot{
