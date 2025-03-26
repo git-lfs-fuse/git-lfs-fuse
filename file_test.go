@@ -197,13 +197,17 @@ func TestRemoteFile_Write_Append(t *testing.T) {
 	if err := pipe(f, o1, 1009, 0, testsize-100); err != nil {
 		t.Fatalf("Read error: %v", err)
 	}
-	for i := testsize - 100; i < testsize+pagesize*3/2; i += s {
+	i := testsize - 100
+	for ; i < testsize+pagesize*3/2; i += s {
 		random(b)
 		n, err := f.Write(context.Background(), b[:s], int64(i))
 		if !errors.Is(err, syscall.Errno(0)) || n != uint32(s) {
 			t.Fatalf("Write error: %d %v", n, err)
 		}
 		_, _ = o1.Write(b[:s])
+	}
+	if f.ptr.Size != int64(i) {
+		t.Fatalf("Size mismatch")
 	}
 	if err := pipe(f, o2, 1009, 0, f.ptr.Size); err != nil { // intentional prime
 		t.Fatalf("Read error: %v", err)
@@ -250,6 +254,12 @@ func TestRemoteFile_Truncate(t *testing.T) {
 	attrIn.Size = 100
 	if err := f.Setattr(context.Background(), attrIn, attr); !errors.Is(err, syscall.Errno(0)) {
 		t.Fatalf("Setattr error: %v", err)
+	}
+	if err := f.Getattr(context.Background(), attr); !errors.Is(err, syscall.Errno(0)) {
+		t.Fatalf("Getattr error: %v", err)
+	}
+	if f.ptr.Size != 100 {
+		t.Fatalf("Size mismatch")
 	}
 	// enlarge
 	attrIn.Size = testsize + 100

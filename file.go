@@ -28,11 +28,6 @@ func generateFid(path string) (string, error) {
 	return strconv.FormatUint(stat.Ino, 10), nil
 }
 
-// xxx/<Oid>/<fid1>/0 -> xxx/<Oid>/shared/0
-// xxx/<Oid>/<fid2>/0 -> xxx/<Oid>/shared/0
-// if <fid1>/0 modified
-// xxx/<Oid>/<fid1>/0 
-// xxx/<Oid>/<fid2>/0 -> xxx/<Oid>/shared/0
 func NewRemoteFile(ptr *lfs.Pointer, pf PageFetcher, pr string, fd int) (*RemoteFile, error) {
 	fid, err := generateFid(pr)
 	if err != nil {
@@ -42,13 +37,18 @@ func NewRemoteFile(ptr *lfs.Pointer, pf PageFetcher, pr string, fd int) (*Remote
 	ps := filepath.Join(pr, ptr.Oid, "shared")
 	pr = filepath.Join(pr, ptr.Oid, fid)
 
-	bs, _ := os.ReadFile(filepath.Join(pr, "tc"))
+	bs, err := os.ReadFile(filepath.Join(pr, "tc"))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
 	tc, err := strconv.ParseInt(string(bs), 10, 64)
 	if err != nil {
 		tc = ptr.Size
 	}
-
-	bs, _ = os.ReadFile(filepath.Join(ps, "tc"))
+	bs, err = os.ReadFile(filepath.Join(ps, "tc"))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
 	sz, err := strconv.ParseInt(string(bs), 10, 64)
 	if err != nil {
 		sz = ptr.Size
@@ -59,10 +59,10 @@ func NewRemoteFile(ptr *lfs.Pointer, pf PageFetcher, pr string, fd int) (*Remote
 type RemoteFile struct {
 	ptr *lfs.Pointer
 	pf  PageFetcher
-	ps	string // directory of shared pages
+	ps  string // directory of shared pages
 	pr  string // root for pages
 	tc  int64  // keep track of truncate operations. This is persisted to the tc file.
-	sz	int64  // original file size
+	sz  int64  // the original file size
 	mu  sync.RWMutex
 	fs.LoopbackFile
 }
@@ -85,123 +85,109 @@ var _ = (fs.FileSetattrer)((*RemoteFile)(nil))
 
 const pagesize = 2 * 1024 * 1024
 
-func (f *RemoteFile) copyPageFromShared(dest, source string) error {
-	if info, err := os.Lstat(dest); err == nil {
-		if info.Mode()&os.ModeSymlink != 0 {
-			if err := os.Remove(dest); err != nil {
-				return err
-			}
-		} else {
-			// if the file exists and is not a symlink, no copy is needed
-			return nil
+func createSymlink(path, dest string) (err error) {
+	if _, err = os.Lstat(dest); err != nil { // make sure the dest file exists.
+		return err
+	}
+	if err = os.Symlink(dest, path); errors.Is(err, os.ErrNotExist) {
+		if err = os.MkdirAll(filepath.Dir(path), 0755); err == nil {
+			err = os.Symlink(dest, path)
 		}
 	}
-
-	sharedPage, err := os.Open(source)
-	if err != nil {
-		return err
-	}
-	defer sharedPage.Close()
-	
-	newPage, err := os.Create(dest)
-	if err != nil {
-		return err
-	}
-	defer newPage.Close()
-
-	if _, err := io.Copy(newPage, sharedPage); err != nil {
-		_ = os.Remove(dest)
-		return err
-	}
-	return nil
+	return err
 }
 
-func (f *RemoteFile) ensureSymlink(pfn, psfn string) error {
-    if _, err := os.Stat(psfn); err != nil {
-        return err
-    }
-    if err := os.Symlink(psfn, pfn); err == nil {
-        return nil
-    }
-    if err := os.MkdirAll(f.pr, 0755); err != nil {
-        return err
-    }
-    return os.Symlink(psfn, pfn)
+func createFile(path string) (file *os.File, err error) {
+	if file, err = os.Create(path); errors.Is(err, os.ErrNotExist) {
+		if err = os.MkdirAll(filepath.Dir(path), 0755); err == nil {
+			file, err = os.Create(path)
+		}
+	}
+	return file, err
+}
+
+func replaceLinkFile(path string) (*os.File, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return createFile(path)
+	} else if err == nil && info.Mode()&os.ModeSymlink == 0 {
+		// if the file exists and is not a symlink, no replacement is needed.
+		return os.OpenFile(path, os.O_RDWR, 0666)
+	} else if err != nil {
+		return nil, err
+	}
+
+	dest, err := os.Open(path) // open the dest file by following the link.
+	if errors.Is(err, os.ErrNotExist) {
+		_ = os.Remove(path) // remove the path which is a broken link.
+		return createFile(path)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer dest.Close()
+
+	_ = os.Remove(path) // remove the link.
+	file, err := createFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := io.Copy(file, dest); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return nil, err
+	}
+	return file, nil
 }
 
 func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, int64, error) {
 	pageNum := off / pagesize
 	pageOff := pageNum * pagesize
 	pageEnd := pageOff + pagesize
-	pageEnd = min(pageEnd, f.ptr.Size)
-	pageEnd = max(pageEnd, pageOff)
 
 	pageStr := strconv.Itoa(int(pageNum))
-	pfn := filepath.Join(f.pr, pageStr)
-	
-	page, err := os.OpenFile(pfn, os.O_RDWR, 0666)
-	if errors.Is(err, os.ErrNotExist) {
-		// TODO: handle file expansion
-		// if pageNum < f.sz / pagesize {}
-		psfn := filepath.Join(f.ps, pageStr)
-		if err := f.ensureSymlink(pfn, psfn); err == nil {
-			page, err = os.OpenFile(pfn, os.O_RDWR, 0666)
-			return page, pageOff, pageEnd - pageOff, err
-		}
-		if err = os.MkdirAll(f.pr, 0755); err == nil {
-			if err := f.ensureSymlink(pfn, psfn); err == nil {
-				page, err = os.OpenFile(pfn, os.O_RDWR, 0666)
-				return page, pageOff, pageEnd - pageOff, err
-			}		
-		}
+	pagePth := filepath.Join(f.pr, pageStr)
 
-		page, err = os.Create(psfn)
-		if errors.Is(err, os.ErrNotExist) {
-			if err = os.MkdirAll(f.ps, 0755); err == nil {
-				page, err = os.Create(psfn)
-			}
-		}
-		if err != nil {
-			return nil, 0, 0, err
-		}
-		
+	page, err := os.OpenFile(pagePth, os.O_RDWR, 0666)
+	if errors.Is(err, os.ErrNotExist) {
 		if pageOff < f.tc {
-			if err = f.pf.Fetch(ctx, page, f.ptr, pageOff, min(pageEnd, f.sz)); err != nil {
+			destPth := filepath.Join(f.ps, pageStr)
+			dest, err := createFile(destPth)
+			if err != nil {
+				return nil, 0, 0, err
+			}
+			if err = f.pf.Fetch(ctx, dest, f.ptr, pageOff, min(pageEnd, f.sz)); err != nil {
 				// TODO: handle ptr not found error
-				_ = page.Close()
-				_ = os.Remove(psfn)
+				_ = dest.Close()
+				_ = os.Remove(destPth)
+				return nil, 0, 0, err
+			}
+			// make sure every page has the same size.
+			if err = dest.Truncate(pagesize); err != nil {
+				_ = dest.Close()
+				_ = os.Remove(destPth)
+				return nil, 0, 0, err
+			}
+			_ = dest.Close()
+			if err = createSymlink(pagePth, destPth); err != nil {
 				return nil, 0, 0, err
 			}
 		}
-		// make sure every page has the same size.
-		if err := page.Truncate(pagesize); err != nil {
-			_ = page.Close()
-			_ = os.Remove(psfn)
-			return nil, 0, 0, err
-		}
-		_ = page.Close()
-
 		if pageEnd <= f.tc {
-			if err := os.Symlink(psfn, pfn); err == nil {
-				page, err = os.OpenFile(pfn, os.O_RDWR, 0666)
-				if err != nil {
-					return nil, 0, 0, err
-				}
-			}
+			page, err = os.OpenFile(pagePth, os.O_RDWR, 0666)
 			if err != nil {
 				return nil, 0, 0, err
 			}
 		} else {
-			if err := f.copyPageFromShared(pfn, psfn); err != nil {
-				return nil, 0, 0, err
-			}
-			page, err = os.OpenFile(pfn, os.O_RDWR, 0666)
+			page, err = replaceLinkFile(pagePth)
 			if err != nil {
 				return nil, 0, 0, err
 			}
-			err = page.Truncate(f.tc - pageOff)
+			err = page.Truncate(max(f.tc-pageOff, 0))
 			err = page.Truncate(pagesize)
 			if err != nil {
+				_ = page.Close()
+				_ = os.Remove(pagePth)
 				return nil, 0, 0, err
 			}
 		}
@@ -210,24 +196,26 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, i
 }
 
 func (f *RemoteFile) getPageForWrite(ctx context.Context, off int64) (*os.File, int64, int64, error) {
-	pageNum := off / pagesize
 	page, pageOff, size, err := f.getPage(ctx, off)
 	if err != nil {
 		return nil, 0, 0, err
 	}
 	_ = page.Close()
 
+	pageNum := off / pagesize
 	pageStr := strconv.Itoa(int(pageNum))
-	pfn := filepath.Join(f.pr, pageStr)
-	if err := f.copyPageFromShared(pfn, filepath.Join(f.ps, pageStr)); err != nil {
-		return nil, 0, 0, err
-	}
-
-	newPage, err := os.OpenFile(pfn, os.O_RDWR, 0666)
+	pagePth := filepath.Join(f.pr, pageStr)
+	page, err = replaceLinkFile(pagePth)
 	if err != nil {
 		return nil, 0, 0, err
 	}
-	return newPage, pageOff, size, nil
+	err = page.Truncate(pagesize)
+	if err != nil {
+		_ = page.Close()
+		_ = os.Remove(pagePth)
+		return nil, 0, 0, err
+	}
+	return page, pageOff, size, nil
 }
 
 func (f *RemoteFile) Read(ctx context.Context, buf []byte, off int64) (res fuse.ReadResult, errno syscall.Errno) {
@@ -320,14 +308,15 @@ func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 	defer f.mu.Unlock()
 	defer f.fixAttr(out)
 
-	if err := os.MkdirAll(f.ps, 0755); err == nil {
-		tcShared := filepath.Join(f.ps, "tc")
-		if _, err := os.Stat(tcShared); os.IsNotExist(err){
-			if err = os.WriteFile(tcShared, []byte(strconv.FormatInt(f.sz, 10)), 0666); err != nil {
-				return fs.ToErrno(err)
-			}
+	szPath := filepath.Join(f.ps, "tc")
+	if _, err := os.Stat(szPath); errors.Is(err, os.ErrNotExist) {
+		if err := os.MkdirAll(f.ps, 0755); err != nil {
+			return fs.ToErrno(err)
 		}
-	} else {
+		if err = os.WriteFile(szPath, []byte(strconv.FormatInt(f.sz, 10)), 0666); err != nil {
+			return fs.ToErrno(err)
+		}
+	} else if err != nil {
 		return fs.ToErrno(err)
 	}
 	if ns := int64(in.Size); ns < f.ptr.Size { // truncate operation
@@ -353,18 +342,15 @@ func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 					return fs.ToErrno(err)
 				}
 			} else if pn := ns / pagesize; pn == pageNum {
-				if err := f.copyPageFromShared(path, filepath.Join(f.ps, p.Name())); err != nil {
-					return fs.ToErrno(err)
-				}
-
-				pf, err := os.OpenFile(path, os.O_RDWR, 0666)
+				page, err := replaceLinkFile(path)
 				if err != nil {
 					return fs.ToErrno(err)
 				}
-				err = pf.Truncate(ns - pn*pagesize)
-				err = pf.Truncate(pagesize) // keep the page in the same size.
-				pf.Close()
+				err = page.Truncate(ns - pn*pagesize)
+				err = page.Truncate(pagesize) // keep the page in the same size.
+				_ = page.Close()
 				if err != nil {
+					_ = os.Remove(path)
 					return fs.ToErrno(err)
 				}
 			}
