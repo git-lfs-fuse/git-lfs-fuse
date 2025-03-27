@@ -150,8 +150,9 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, i
 
 	page, err := os.OpenFile(pagePth, os.O_RDWR, 0666)
 	if errors.Is(err, os.ErrNotExist) {
-		if pageOff < f.tc {
-			destPth := filepath.Join(f.ps, pageStr)
+		destPth := filepath.Join(f.ps, pageStr)
+		err = createSymlink(pagePth, destPth)
+		if pageOff < f.tc && errors.Is(err, os.ErrNotExist) {
 			dest, err := createFile(destPth)
 			if err != nil {
 				return nil, 0, 0, err
@@ -172,6 +173,8 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, i
 			if err = createSymlink(pagePth, destPth); err != nil {
 				return nil, 0, 0, err
 			}
+		} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, 0, 0, err
 		}
 		if pageEnd <= f.tc {
 			page, err = os.OpenFile(pagePth, os.O_RDWR, 0666)
