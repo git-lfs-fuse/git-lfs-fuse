@@ -157,7 +157,7 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, i
 			if err != nil {
 				return nil, 0, 0, err
 			}
-			if err = f.pf.Fetch(ctx, dest, f.ptr, pageOff, min(pageEnd, f.sz)); err != nil {
+			if err = f.pf.Fetch(ctx, dest, f.ptr, pageOff, min(pageEnd, f.sz), pageStr); err != nil {
 				// TODO: handle ptr not found error
 				_ = dest.Close()
 				_ = os.Remove(destPth)

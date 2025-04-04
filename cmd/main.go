@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 
 	gitlfsfuse "github.com/git-lfs-fuse/git-lfs-fuse"
 	"github.com/spf13/cobra"
@@ -37,6 +38,7 @@ func main() {
 	mountCmd.Flags().Bool("no-tags", false, "don't clone any tags, and make later fetches not to follow them")
 	mountCmd.Flags().Bool("shallow-submodules", false, "any cloned submodules will be shallow")
 	mountCmd.Flags().BoolVar(&directMount, "direct-mount", false, "try to call the mount syscall instead of executing fusermount")
+	mountCmd.Flags().Int("max-pages", 5120, "maximum cached pages")
 	entryCmd.AddCommand(mountCmd)
 	if err := entryCmd.Execute(); err != nil {
 		log.Fatal(err)
@@ -52,15 +54,25 @@ func mountRun(cmd *cobra.Command, args []string) {
 		mountPoint = args[1]
 	}
 	var gitOptions []string
+	var maxPages int64
+	var err error
 	cmd.Flags().Visit(func(flg *pflag.Flag) {
 		switch flg.Name {
 		case "origin", "branch", "depth":
 			gitOptions = append(gitOptions, fmt.Sprintf("--%s=%s", flg.Name, flg.Value.String()))
+		case "max-pages":
+			maxPages, err = strconv.ParseInt(flg.Value.String(), 10, 64)
 		default:
 			gitOptions = append(gitOptions, fmt.Sprintf("--%s", flg.Name))
 		}
 	})
-	_, mnt, svc, err := gitlfsfuse.CloneMount(args[0], mountPoint, directMount, gitOptions)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if maxPages <= 0 {
+		maxPages = 5120
+	}
+	_, mnt, svc, err := gitlfsfuse.CloneMount(args[0], mountPoint, directMount, gitOptions, maxPages)
 	if err != nil {
 		log.Fatal(err)
 	}
