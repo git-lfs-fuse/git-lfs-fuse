@@ -231,7 +231,7 @@ func TestMount(t *testing.T) {
 	o := sha256.New()
 	bytes, err := os.ReadFile(filepath.Join(mnt, "emptylarge.bin"))
 	if err != nil {
-		t.Fatal(err)
+		t.Errorf("ReadFile error: %v", err)
 	}
 	o.Write(bytes)
 	if ptr.Oid != hex.EncodeToString(o.Sum(nil)) {

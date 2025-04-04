@@ -161,6 +161,9 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, i
 				// TODO: handle ptr not found error
 				_ = dest.Close()
 				_ = os.Remove(destPth)
+				if errors.Is(err, context.Canceled) { // will this cause a retry loop?
+					return nil, 0, 0, syscall.EINTR
+				}
 				return nil, 0, 0, err
 			}
 			// make sure every page has the same size.

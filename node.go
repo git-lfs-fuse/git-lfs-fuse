@@ -296,10 +296,13 @@ func NewGitLFSFuseRoot(rootPath string, cfg *config.Configuration) (fs.InodeEmbe
 		WithVariableTTL().
 		Build()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	pr := filepath.Join(rootPath, ".git", "fuse")
+	if err := os.MkdirAll(pr, 0755); err != nil {
+		return nil, err
+	}
 
 	pf := &pageFetcher{
 		remote:    cfg.Remote(),
