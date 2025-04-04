@@ -196,7 +196,7 @@ func cloneMount(t *testing.T) (hid, repo string, cancel func()) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hid, repo, svc, err = CloneMount(r.repo, filepath.Join(mnt, "repo"), false, nil)
+	hid, repo, svc, err = CloneMount(r.repo, filepath.Join(mnt, "repo"), false, nil, 5120)
 	if err != nil {
 		t.Fatal(err)
 	}
