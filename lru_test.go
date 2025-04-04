@@ -1,11 +1,19 @@
 package gitlfsfuse
 
 import (
+	"os"
+	"strings"
 	"testing"
 )
 
 func TestNewDoubleLRU(t *testing.T) {
-	lru := NewDoubleLRU()
+	logFile := "test_new_lru.log"
+	defer os.Remove(logFile) // clean up after the test
+	lru, err := NewDoubleLRU(logFile)
+	if err != nil {
+		t.Fatalf("Expected no error from NewDoubleLRU, got: %v", err)
+	}
+
 	if lru.Size() != 0 {
 		t.Errorf("New LRU should have size 0, got %d", lru.Size())
 	}
@@ -17,10 +25,18 @@ func TestNewDoubleLRU(t *testing.T) {
 }
 
 func TestAdd(t *testing.T) {
-	lru := NewDoubleLRU()
+	logFile := "test_new_lru.log"
+	defer os.Remove(logFile) // clean up after the test
+	lru, err := NewDoubleLRU(logFile)
+	if err != nil {
+		t.Fatalf("Expected no error from NewDoubleLRU, got: %v", err)
+	}
 	
 	// Add first item
-	lru.Add("oid1", "page1")
+	err = lru.Add("oid1", "page1")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
 	if lru.Size() != 1 {
 		t.Errorf("Size should be 1, got %d", lru.Size())
 	}
@@ -31,31 +47,54 @@ func TestAdd(t *testing.T) {
 	}
 	
 	// Add second page for same oid
-	lru.Add("oid1", "page2")
+	err = lru.Add("oid1", "page2")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
 	if lru.Size() != 2 {
 		t.Errorf("Size should be 2, got %d", lru.Size())
 	}
 	
 	// Add page for different oid
-	lru.Add("oid2", "page1")
+	err = lru.Add("oid2", "page1")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
 	if lru.Size() != 3 {
 		t.Errorf("Size should be 3, got %d", lru.Size())
 	}
 	
 	// Add existing item (should not increase size)
-	lru.Add("oid1", "page1")
+	err = lru.Add("oid1", "page1")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
 	if lru.Size() != 3 {
 		t.Errorf("Size should still be 3, got %d", lru.Size())
 	}
 }
 
 func TestMoveToEnd(t *testing.T) {
-	lru := NewDoubleLRU()
+	logFile := "test_new_lru.log"
+	defer os.Remove(logFile) // clean up after the test
+	lru, err := NewDoubleLRU(logFile)
+	if err != nil {
+		t.Fatalf("Expected no error from NewDoubleLRU, got: %v", err)
+	}
 	
 	// Add items
-	lru.Add("oid1", "page1")
-	lru.Add("oid1", "page2")
-	lru.Add("oid2", "page1")
+	err = lru.Add("oid1", "page1")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	err = lru.Add("oid1", "page2")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	err = lru.Add("oid2", "page1")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
 	
 	// Check initial order
 	oid, pageNum := lru.First()
@@ -64,7 +103,10 @@ func TestMoveToEnd(t *testing.T) {
 	}
 	
 	// Move first item to end
-	lru.MoveToEnd("oid1", "page1")
+	err = lru.MoveToEnd("oid1", "page1")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
 	
 	// Check new order
 	oid, pageNum = lru.First()
@@ -73,7 +115,10 @@ func TestMoveToEnd(t *testing.T) {
 	}
 	
 	// Move oid to end
-	lru.MoveToEnd("oid2", "page1")
+	err = lru.MoveToEnd("oid2", "page1")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
 	
 	// Check new order
 	oid, pageNum = lru.First()
@@ -83,27 +128,50 @@ func TestMoveToEnd(t *testing.T) {
 }
 
 func TestDelete(t *testing.T) {
-	lru := NewDoubleLRU()
+	logFile := "test_new_lru.log"
+	defer os.Remove(logFile) // clean up after the test
+	lru, err := NewDoubleLRU(logFile)
+	if err != nil {
+		t.Fatalf("Expected no error from NewDoubleLRU, got: %v", err)
+	}
 	
 	// Add items
-	lru.Add("oid1", "page1")
-	lru.Add("oid1", "page2")
-	lru.Add("oid2", "page1")
+	err = lru.Add("oid1", "page1")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	err = lru.Add("oid1", "page2")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	err = lru.Add("oid2", "page1")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
 	
 	// Delete existing page
-	lru.Delete("oid1", "page1")
+	err = lru.Delete("oid1", "page1")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
 	if lru.Size() != 2 {
 		t.Errorf("Size should be 2, got %d", lru.Size())
 	}
 	
 	// Delete non-existing page (should not affect size)
-	lru.Delete("oid1", "page3")
+	err = lru.Delete("oid1", "page3")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
 	if lru.Size() != 2 {
 		t.Errorf("Size should still be 2, got %d", lru.Size())
 	}
 	
 	// Delete last page of an oid (should also remove the oid)
-	lru.Delete("oid1", "page2")
+	err = lru.Delete("oid1", "page2")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
 	if lru.Size() != 1 {
 		t.Errorf("Size should be 1, got %d", lru.Size())
 	}
@@ -114,7 +182,10 @@ func TestDelete(t *testing.T) {
 	}
 	
 	// Delete last item
-	lru.Delete("oid2", "page1")
+	err = lru.Delete("oid2", "page1")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
 	if lru.Size() != 0 {
 		t.Errorf("Size should be 0, got %d", lru.Size())
 	}
@@ -126,14 +197,34 @@ func TestDelete(t *testing.T) {
 }
 
 func TestComplexScenario(t *testing.T) {
-	lru := NewDoubleLRU()
+	logFile := "test_new_lru.log"
+	defer os.Remove(logFile) // clean up after the test
+	lru, err := NewDoubleLRU(logFile)
+	if err != nil {
+		t.Fatalf("Expected no error from NewDoubleLRU, got: %v", err)
+	}
 	
 	// Add several items
-	lru.Add("oid1", "page1")
-	lru.Add("oid1", "page2")
-	lru.Add("oid2", "page1")
-	lru.Add("oid3", "page1")
-	lru.Add("oid3", "page2")
+	err = lru.Add("oid1", "page1")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	err = lru.Add("oid1", "page2")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	err = lru.Add("oid2", "page1")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	err = lru.Add("oid3", "page1")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	err = lru.Add("oid3", "page2")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
 	
 	// Test initial size
 	if lru.Size() != 5 {
@@ -147,8 +238,14 @@ func TestComplexScenario(t *testing.T) {
 	}
 	
 	// Move items around
-	lru.MoveToEnd("oid1", "page1")
-	lru.MoveToEnd("oid2", "page1")
+	err = lru.MoveToEnd("oid1", "page1")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	err = lru.MoveToEnd("oid2", "page1")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
 	
 	// First should now be oid1/page2
 	oid, pageNum = lru.First()
@@ -157,8 +254,14 @@ func TestComplexScenario(t *testing.T) {
 	}
 	
 	// Delete some items
-	lru.Delete("oid1", "page2")
-	lru.Delete("oid3", "page1")
+	err = lru.Delete("oid1", "page2")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	err = lru.Delete("oid3", "page1")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
 	
 	// Size should be 3
 	if lru.Size() != 3 {
@@ -172,9 +275,18 @@ func TestComplexScenario(t *testing.T) {
 	}
 	
 	// Delete rest of the items
-	lru.Delete("oid1", "page1")
-	lru.Delete("oid2", "page1")
-	lru.Delete("oid3", "page2")
+	err = lru.Delete("oid1", "page1")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	err = lru.Delete("oid2", "page1")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	err = lru.Delete("oid3", "page2")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
 	
 	// Check final state
 	if lru.Size() != 0 {
@@ -189,16 +301,36 @@ func TestComplexScenario(t *testing.T) {
 
 func TestEvictionScenario(t *testing.T) {
 	// This test simulates how this would be used in a cache eviction scenario
-	lru := NewDoubleLRU()
+	logFile := "test_new_lru.log"
+	defer os.Remove(logFile) // clean up after the test
+	lru, err := NewDoubleLRU(logFile)
+	if err != nil {
+		t.Fatalf("Expected no error from NewDoubleLRU, got: %v", err)
+	}
 	
 	// Add several items
-	lru.Add("oid1", "page1")
-	lru.Add("oid1", "page2")
-	lru.Add("oid2", "page1")
-	lru.Add("oid3", "page1")
+	err = lru.Add("oid1", "page1")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	err = lru.Add("oid1", "page2")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	err = lru.Add("oid2", "page1")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	err = lru.Add("oid3", "page1")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
 	
 	// Simulate using oid2/page1, which should move it to the back
-	lru.MoveToEnd("oid2", "page1")
+	err = lru.MoveToEnd("oid2", "page1")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
 	
 	// Check which item should be evicted (should be oid1/page1)
 	oid, pageNum := lru.First()
@@ -207,7 +339,10 @@ func TestEvictionScenario(t *testing.T) {
 	}
 	
 	// Evict the LRU item
-	lru.Delete(oid, pageNum)
+	err = lru.Delete(oid, pageNum)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
 	
 	// Next LRU should be oid1/page2
 	oid, pageNum = lru.First()
@@ -216,7 +351,10 @@ func TestEvictionScenario(t *testing.T) {
 	}
 	
 	// Simulate accessing oid1/page2
-	lru.MoveToEnd("oid1", "page2")
+	err = lru.MoveToEnd("oid1", "page2")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
 	
 	// Next LRU should be oid3/page1
 	oid, pageNum = lru.First()
@@ -224,7 +362,10 @@ func TestEvictionScenario(t *testing.T) {
 		t.Errorf("First should be (oid3, page1), got (%s, %s)", oid, pageNum)
 	}
 
-	lru.Delete(oid, pageNum)
+	err = lru.Delete(oid, pageNum)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
 	oid, pageNum = lru.First()
 	if oid != "oid2" || pageNum != "page1" {
 		t.Errorf("First should be (oid2, page1), got (%s, %s)", oid, pageNum)
@@ -232,5 +373,53 @@ func TestEvictionScenario(t *testing.T) {
 
 	if lru.Size() != 2 {
 		t.Errorf("Size should be 2, got (%d)", lru.Size())
+	}
+}
+
+func TestLogReplay(t *testing.T) {
+	logFile := "test_lru.log"
+	defer os.Remove(logFile) // cleanup after test
+
+	// Pre-fill a log file manually
+	content := strings.Join([]string{
+		"A oid1 page1",
+		"A oid1 page2",
+		"A oid2 page1",
+		"M oid1 page1",
+		"D oid1 page2",
+	}, "\n") + "\n" // <-- ensure final newline
+	err := os.WriteFile(logFile, []byte(content), 0644)
+	if err != nil {
+		t.Fatalf("Failed to write log file: %v", err)
+	}
+
+	lru, err := NewDoubleLRU(logFile)
+	if err != nil {
+		t.Fatalf("Failed to initialize LRU from log: %v", err)
+	}
+
+	if lru.Size() != 2 {
+		t.Errorf("Expected size 2 after replay, got %d", lru.Size())
+	}
+
+	oid, page := lru.First()
+	if oid != "oid2" || page != "page1" {
+		t.Errorf("First after replay should be (oid2, page1), got (%s, %s)", oid, page)
+	}
+}
+
+func TestCorruptedLogLine(t *testing.T) {
+	logFile := "test_corrupt.log"
+	defer os.Remove(logFile)
+
+	content := "A oid1 page1\nBADLINE\n"
+	err := os.WriteFile(logFile, []byte(content), 0644)
+	if err != nil {
+		t.Fatalf("Failed to write log file: %v", err)
+	}
+
+	_, err = NewDoubleLRU(logFile)
+	if err == nil {
+		t.Errorf("Expected error due to corrupted log line, got nil")
 	}
 }
