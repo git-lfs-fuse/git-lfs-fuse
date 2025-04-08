@@ -397,6 +397,9 @@ func CloneMount(remote, mountPoint string, directMount bool, gitOptions []string
 	if err != nil {
 		return "", "", nil, err
 	}
+	if err := os.MkdirAll(mnt, 0755); err != nil {
+		return "", "", nil, err
+	}
 	svc, err := fs.Mount(mnt, pxy, &fs.Options{
 		NullPermissions: true, // Leave file permissions on "000" files as-is
 		MountOptions: fuse.MountOptions{

@@ -118,7 +118,7 @@ func prepareRepo() (r *repository, err error) {
 	}
 	_ = f.Close()
 
-	if _, err = run(tmp, "git", "init"); err != nil {
+	if _, err = run(tmp, "git", "init", "--initial-branch=main"); err != nil {
 		return
 	}
 	cfg := config.NewIn(tmp, "")
@@ -136,6 +136,12 @@ func prepareRepo() (r *repository, err error) {
 	if _, err = run(tmp, "git", "add", "-A"); err != nil {
 		return
 	}
+	if _, err = run(tmp, "git", "config", "user.email", "testuser@example.com"); err != nil {
+		return
+	}
+	if _, err = run(tmp, "git", "config", "user.name", "testuser"); err != nil {
+		return
+	}
 	if _, err = run(tmp, "git", "commit", "-m", "msg"); err != nil {
 		return
 	}
@@ -146,13 +152,13 @@ func prepareRepo() (r *repository, err error) {
 		return
 	}
 	r.repo = filepath.Join(remote, "repo.git")
-	if _, err = run(tmp, "git", "init", "--bare", r.repo); err != nil {
+	if _, err = run(tmp, "git", "init", "--bare", r.repo, "--initial-branch=main"); err != nil {
 		return
 	}
 	if _, err = run(tmp, "git", "remote", "add", "origin", r.repo); err != nil {
 		return
 	}
-	if _, err = run(tmp, "git", "push", "origin", "main"); err != nil {
+	if _, err = run(tmp, "git", "push", "-u", "origin", "main"); err != nil {
 		return
 	}
 	return r, nil
