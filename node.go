@@ -296,7 +296,7 @@ func NewGitLFSFuseRoot(rootPath string, cfg *config.Configuration, maxPages int6
 		WithVariableTTL().
 		Build()
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
 
 	pr := filepath.Join(rootPath, ".git", "fuse")

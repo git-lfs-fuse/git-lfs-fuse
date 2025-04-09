@@ -1,4 +1,4 @@
-package gitlfsfuse
+package gitlsfsfuse
 
 import (
 	"crypto/sha256"
