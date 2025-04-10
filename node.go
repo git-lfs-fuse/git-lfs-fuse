@@ -226,25 +226,26 @@ func (n *FSNode) CopyFileRange(ctx context.Context, fhIn fs.FileHandle,
 }
 
 func (n *FSNode) fixAttr(out *fuse.Attr, name string) {
-	if n.Metadata.(*FSNodeData).Ignore || out.Size >= 1024 {
+	if n.IsDir() || n.Metadata.(*FSNodeData).Ignore || out.Size >= 1024 {
 		return
 	}
 	if r, err := os.Open(filepath.Join(n.path(), name)); err == nil {
 		if ptr, _ := lfs.DecodePointer(r); ptr != nil {
 			// TODO: move this step to a custom smudge filter
 			move := ""
-			idp := filepath.Join(n.path(), ".git", "index")
+			idp := filepath.Join(n.RootData.Path, ".git", "index")
 			if f, _ := os.Open(idp); f != nil {
 				idx := index.Index{}
 				if err := index.NewDecoder(f).Decode(&idx); err == nil {
+					entry := filepath.Join(n.Path(n.root()), name)
 					i := sort.Search(len(idx.Entries), func(i int) bool {
-						return bytes.Compare([]byte(idx.Entries[i].Name), []byte(name)) >= 0
+						return bytes.Compare([]byte(idx.Entries[i].Name), []byte(entry)) >= 0
 					})
 					if i >= 0 && uint64(idx.Entries[i].Size) == out.Size &&
 						idx.Entries[i].CreatedAt.Equal(time.Unix(int64(out.Ctime), int64(out.Ctimensec))) &&
 						idx.Entries[i].ModifiedAt.Equal(time.Unix(int64(out.Mtime), int64(out.Mtimensec))) {
 						idx.Entries[i].Size = uint32(ptr.Size)
-						move = filepath.Join(n.path(), ".git", "index-fuse")
+						move = filepath.Join(n.RootData.Path, ".git", "index-fuse")
 						if f2, _ := os.Create(move); f2 != nil {
 							if err := index.NewEncoder(f2).Encode(&idx); err != nil {
 								move = ""
