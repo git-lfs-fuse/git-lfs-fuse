@@ -7,8 +7,11 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/git-lfs/git-lfs/v3/git"
@@ -24,7 +27,7 @@ type action struct {
 }
 
 type PageFetcher interface {
-	Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, off, end int64) error
+	Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, off, end int64, pageNum string) error
 }
 
 type pageFetcher struct {
@@ -32,6 +35,11 @@ type pageFetcher struct {
 	actions   *otter.CacheWithVariableTTL[string, action]
 	remoteRef *git.Ref
 	manifest  tq.Manifest
+	mu        sync.Mutex
+	cacheDir  string
+	lru       DoubleLRU
+	maxPages  int64
+	pr 		  string
 }
 
 func (p *pageFetcher) getAction(ctx context.Context, ptr *lfs.Pointer) (action, error) {
@@ -122,8 +130,26 @@ func (p *pageFetcher) download(ctx context.Context, w io.Writer, a action, off, 
 	return off + n, err
 }
 
-func (p *pageFetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, off, end int64) error {
+func (p *pageFetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, off, end int64, pageNum string) error {
 	// TODO: single flight by ptr.Oid+range and make it asyncable.
+	p.mu.Lock()
+
+	for p.lru.Size() >= p.maxPages {
+		oid, pageNum := p.lru.First()
+		path := filepath.Join(p.pr, oid, "shared", pageNum)
+		err := os.Remove(path)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			p.mu.Unlock()
+			return err
+		}
+		err = p.lru.Delete(oid, pageNum)
+		if err != nil {
+			p.mu.Unlock()
+			return err
+		}
+	}
+	p.mu.Unlock()
+
 	a, err := p.getAction(ctx, ptr)
 	if err != nil {
 		return err
@@ -137,6 +163,15 @@ func (p *pageFetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, 
 				time.Sleep(r.after)
 			}
 		}
+	}
+	if err != nil {
+		return err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	err = p.lru.Add(ptr.Oid, pageNum)
+	if err != nil {
+		return err
 	}
 	return err
 }
