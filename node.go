@@ -241,7 +241,7 @@ func (n *FSNode) fixAttr(out *fuse.Attr, name string) {
 					i := sort.Search(len(idx.Entries), func(i int) bool {
 						return bytes.Compare([]byte(idx.Entries[i].Name), []byte(entry)) >= 0
 					})
-					if i >= 0 && uint64(idx.Entries[i].Size) == out.Size &&
+					if i < len(idx.Entries) && uint64(idx.Entries[i].Size) == out.Size &&
 						idx.Entries[i].CreatedAt.Equal(time.Unix(int64(out.Ctime), int64(out.Ctimensec))) &&
 						idx.Entries[i].ModifiedAt.Equal(time.Unix(int64(out.Mtime), int64(out.Mtimensec))) {
 						idx.Entries[i].Size = uint32(ptr.Size)

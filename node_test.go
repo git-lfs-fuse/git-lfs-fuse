@@ -96,6 +96,16 @@ func prepareRepo() (r *repository, err error) {
 	}
 	_ = f.Close()
 
+	f, err = os.Create(filepath.Join(tmp, "normal.txt"))
+	if err != nil {
+		return
+	}
+	if err = f.Truncate(1024); err != nil {
+		_ = f.Close()
+		return
+	}
+	_ = f.Close()
+
 	r.dir, err = os.MkdirTemp("", "glf-svc")
 	if err != nil {
 		return
@@ -161,6 +171,60 @@ func prepareRepo() (r *repository, err error) {
 	if _, err = run(tmp, "git", "push", "-u", "origin", "main"); err != nil {
 		return
 	}
+
+	// Prepare a new branch
+	if _, err = run(tmp, "git", "checkout", "-b", "branch2"); err != nil {
+		return
+	}
+	// Modify the files
+	f, err = os.Create(filepath.Join(tmp, "emptylarge.bin"))
+	if err != nil {
+		return
+	}
+	if err = f.Truncate(pagesize); err != nil { // change the file size
+		_ = f.Close()
+		return
+	}
+	_ = f.Close()
+	f, err = os.Create(filepath.Join(tmp, "emptylarge2.bin"))
+	if err != nil {
+		return
+	}
+	if err = f.Truncate(pagesize * 5); err != nil { // change the file size
+		_ = f.Close()
+		return
+	}
+	_ = f.Close()
+
+	f, err = os.Create(filepath.Join(tmp, "normal.txt"))
+	if err != nil {
+		return
+	}
+	if err = f.Truncate(pagesize); err != nil { // change the file size
+		_ = f.Close()
+		return
+	}
+	_ = f.Close()
+	f, err = os.Create(filepath.Join(tmp, "normal2.txt"))
+	if err != nil {
+		return
+	}
+	if err = f.Truncate(1024); err != nil { // change the file size
+		_ = f.Close()
+		return
+	}
+	_ = f.Close()
+
+	if _, err = run(tmp, "git", "add", "-A"); err != nil {
+		return
+	}
+	if _, err = run(tmp, "git", "commit", "-m", "msg"); err != nil {
+		return
+	}
+	if _, err = run(tmp, "git", "push", "-u", "origin", "branch2"); err != nil {
+		return
+	}
+
 	return r, nil
 }
 
@@ -203,44 +267,133 @@ func cloneMount(t *testing.T) (hid, repo string, cancel func()) {
 	return
 }
 
-func TestMount(t *testing.T) {
-	hid, mnt, cancel := cloneMount(t)
-	defer cancel()
+func verifyLocalFile(t *testing.T, hid, mnt, name string) os.FileInfo {
+	t.Helper()
 
-	fi1, err := os.Stat(filepath.Join(hid, "emptylarge.bin"))
+	fi1, err := os.Stat(filepath.Join(hid, name))
 	if err != nil {
 		t.Fatal(err)
 	}
-	fi2, err := os.Stat(filepath.Join(mnt, "emptylarge.bin"))
+	fi2, err := os.Stat(filepath.Join(mnt, name))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if fi1.Name() != fi2.Name() {
-		t.Errorf("fi doesn't match")
+		t.Fatalf("file name doesn't match: %v != %v", fi1.Name(), fi2.Name())
 	}
 	if fi1.Mode() != fi2.Mode() {
-		t.Errorf("fi doesn't match")
+		t.Fatalf("file mode doesn't match: %v != %v", fi1.Mode(), fi2.Mode())
 	}
 	if fi1.IsDir() != fi2.IsDir() {
-		t.Errorf("fi doesn't match")
+		t.Fatalf("file isdir doesn't match: %v != %v", fi1.IsDir(), fi2.IsDir())
 	}
 	if fi1.ModTime() != fi2.ModTime() {
-		t.Errorf("fi doesn't match")
+		t.Fatalf("file modtime doesn't match: %v != %v", fi1.ModTime(), fi2.ModTime())
 	}
-	ptr, err := lfs.DecodePointerFromFile(filepath.Join(hid, "emptylarge.bin"))
+	if fi1.Size() != fi2.Size() {
+		t.Fatalf("file size doesn't match: %v != %v", fi1.Size(), fi2.Size())
+	}
+	o1 := sha256.New()
+	o2 := sha256.New()
+	bytes1, err := os.ReadFile(filepath.Join(hid, name))
+	if err != nil {
+		t.Fatalf("ReadFile error: %v", err)
+	}
+	bytes2, err := os.ReadFile(filepath.Join(mnt, name))
+	if err != nil {
+		t.Fatalf("ReadFile error: %v", err)
+	}
+	o1.Write(bytes1)
+	o2.Write(bytes2)
+	if sum1, sum2 := hex.EncodeToString(o1.Sum(nil)), hex.EncodeToString(o2.Sum(nil)); sum1 != sum2 {
+		t.Fatalf("file sum doesn't match: %v != %v", sum1, sum2)
+	}
+
+	return fi2
+}
+
+func verifyRemoteFile(t *testing.T, hid, mnt, name string) os.FileInfo {
+	t.Helper()
+
+	fi1, err := os.Stat(filepath.Join(hid, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fi2, err := os.Stat(filepath.Join(mnt, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi1.Name() != fi2.Name() {
+		t.Fatalf("file name doesn't match: %v != %v", fi1.Name(), fi2.Name())
+	}
+	if fi1.Mode() != fi2.Mode() {
+		t.Fatalf("file mode doesn't match: %v != %v", fi1.Mode(), fi2.Mode())
+	}
+	if fi1.IsDir() != fi2.IsDir() {
+		t.Fatalf("file isdir doesn't match: %v != %v", fi1.IsDir(), fi2.IsDir())
+	}
+	if fi1.ModTime() != fi2.ModTime() {
+		t.Fatalf("file modtime doesn't match: %v != %v", fi1.ModTime(), fi2.ModTime())
+	}
+	ptr, err := lfs.DecodePointerFromFile(filepath.Join(hid, name))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if fi2.Size() != ptr.Size {
-		t.Errorf("fi doesn't match")
+		t.Fatalf("file size doesn't match: %v != %v", fi2.Size(), ptr.Size)
 	}
 	o := sha256.New()
-	bytes, err := os.ReadFile(filepath.Join(mnt, "emptylarge.bin"))
+	bytes, err := os.ReadFile(filepath.Join(mnt, name))
 	if err != nil {
-		t.Errorf("ReadFile error: %v", err)
+		t.Fatalf("ReadFile error: %v", err)
 	}
 	o.Write(bytes)
-	if ptr.Oid != hex.EncodeToString(o.Sum(nil)) {
-		t.Errorf("oid doesn't match")
+	if sum := hex.EncodeToString(o.Sum(nil)); ptr.Oid != sum {
+		t.Fatalf("oid doesn't match: %v != %v", ptr.Oid, sum)
 	}
+
+	return fi2
+}
+
+func TestMount(t *testing.T) {
+	hid, mnt, cancel := cloneMount(t)
+	defer cancel()
+
+	_ = verifyLocalFile(t, hid, mnt, "normal.txt")
+	_ = verifyRemoteFile(t, hid, mnt, "emptylarge.bin")
+}
+
+func TestMountCheckout(t *testing.T) {
+	hid, mnt, cancel := cloneMount(t)
+	defer cancel()
+
+	ni1 := verifyLocalFile(t, hid, mnt, "normal.txt")
+	if ni1.Size() != 1024 {
+		t.Fatalf("file size doesn't match: %v != %v", ni1.Size(), 1024)
+	}
+
+	fi1 := verifyRemoteFile(t, hid, mnt, "emptylarge.bin")
+	if fi1.Size() != pagesize*5 {
+		t.Fatalf("file size doesn't match: %v != %v", fi1.Size(), pagesize*5)
+	}
+
+	if _, err := run(mnt, "git", "checkout", "-f", "branch2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(mnt, "git", "pull"); err != nil {
+		t.Fatal(err)
+	}
+
+	ni2 := verifyLocalFile(t, hid, mnt, "normal.txt")
+	if ni2.Size() != pagesize {
+		t.Fatalf("file size doesn't match: %v != %v", ni1.Size(), pagesize)
+	}
+
+	fi2 := verifyRemoteFile(t, hid, mnt, "emptylarge.bin")
+	if fi2.Size() != pagesize {
+		t.Fatalf("file size doesn't match: %v != %v", fi2.Size(), pagesize)
+	}
+
+	_ = verifyLocalFile(t, hid, mnt, "normal2.txt")
+	_ = verifyRemoteFile(t, hid, mnt, "emptylarge2.bin")
 }
