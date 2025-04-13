@@ -264,6 +264,12 @@ func cloneMount(t *testing.T) (hid, repo string, cancel func()) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err = run(repo, "git", "config", "user.email", "testuser@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = run(repo, "git", "config", "user.name", "testuser"); err != nil {
+		t.Fatal(err)
+	}
 	return
 }
 
@@ -430,16 +436,16 @@ func TestLocalFileWrite(t *testing.T) {
 	if _, err := run(mnt, "git", "add", "normal.txt"); err != nil {
 		t.Fatalf("git add error: %v", err)
 	}
-	if _, err := run(mnt, "git", "commit", "-m", "Modify normal.txt"); err != nil {
-		t.Fatalf("git commit error: %v", err)
+	if out, err := run(mnt, "git", "commit", "-m", "Modify normal.txt"); err != nil {
+		t.Fatalf("git commit error: %s\n%v", out, err)
 	}
 	_ = verifyLocalFile(t, hid, mnt, "normal.txt")
 
 	if _, err := run(mnt, "git", "add", "normal3.txt"); err != nil {
 		t.Fatalf("git add error: %v", err)
 	}
-	if _, err := run(mnt, "git", "commit", "-m", "Add normal3.txt"); err != nil {
-		t.Fatalf("git commit error: %v", err)
+	if out, err := run(mnt, "git", "commit", "-m", "Add normal3.txt"); err != nil {
+		t.Fatalf("git commit error: %s\n%v", out, err)
 	}
 	_ = verifyLocalFile(t, hid, mnt, "normal3.txt")
 
@@ -461,13 +467,13 @@ func TestRemoteFileWrite(t *testing.T) {
 		t.Fatalf("failed to write remote file: %v", err)
 	}
 
-	// mntContent, err := os.ReadFile(filePath)
-	// if err != nil {
-	// 	t.Fatalf("failed to read file from mnt: %v", err)
-	// }
-	// if string(mntContent) != string(newContent) {
-	// 	t.Fatalf("mnt file content mismatch: got %q, want %q", mntContent, newContent)
-	// }
+	mntContent, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("failed to read file from mnt: %v", err)
+	}
+	if string(mntContent) != string(newContent) {
+		t.Fatalf("mnt file content mismatch: got %q, want %q", mntContent, newContent)
+	}
 
 	// create new remote file
 	newFilePath := filepath.Join(mnt, "emptylarge3.bin")
@@ -486,17 +492,25 @@ func TestRemoteFileWrite(t *testing.T) {
 	if _, err := run(mnt, "git", "commit", "-m", "Modify emptylarge.bin"); err != nil {
 		t.Fatalf("git commit error: %v", err)
 	}
-	_ = verifyRemoteFile(t, hid, mnt, "emptylarge.bin")
-
 	if _, err := run(mnt, "git", "add", "emptylarge3.bin"); err != nil {
 		t.Fatalf("git add error: %v", err)
 	}
 	if _, err := run(mnt, "git", "commit", "-m", "Add emptylarge3.bin"); err != nil {
 		t.Fatalf("git commit error: %v", err)
 	}
-	_ = verifyRemoteFile(t, hid, mnt, "emptylarge3.bin")
 
 	if _, err := run(mnt, "git", "push", "-u", "origin", "main"); err != nil {
 		t.Fatalf("git push error: %v", err)
 	}
+
+	// checkout back to the original branch (main) to refresh the new pointer files
+	if _, err := run(mnt, "git", "checkout", "-f", "branch2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(mnt, "git", "checkout", "-f", "main"); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = verifyRemoteFile(t, hid, mnt, "emptylarge.bin")
+	_ = verifyRemoteFile(t, hid, mnt, "emptylarge3.bin")
 }

@@ -286,7 +286,31 @@ func (f *RemoteFile) Release(ctx context.Context) syscall.Errno {
 }
 
 func (f *RemoteFile) Flush(ctx context.Context) syscall.Errno {
-	return f.LoopbackFile.Flush(ctx)
+	var attr fuse.AttrOut
+	// TODO: can we cache the attr?
+	err := f.LoopbackFile.Getattr(ctx, &attr)
+	if err != 0 {
+		return err
+	}
+	bs := []byte(f.ptr.Encoded())
+	n, err := f.LoopbackFile.Write(ctx, bs, 0)
+	if int(n) != len(bs) {
+		return err
+	}
+	attrIn := &fuse.SetAttrIn{
+		SetAttrInCommon: fuse.SetAttrInCommon{
+			Size:      uint64(len(bs)),
+			Atime:     attr.Atime,
+			Mtime:     attr.Mtime,
+			Ctime:     attr.Ctime,
+			Atimensec: attr.Atimensec,
+			Mtimensec: attr.Mtimensec,
+			Ctimensec: attr.Ctimensec,
+			Mode:      attr.Mode,
+			Owner:     attr.Owner,
+		},
+	}
+	return f.LoopbackFile.Setattr(ctx, attrIn, &attr)
 }
 
 func (f *RemoteFile) Fsync(ctx context.Context, flags uint32) (errno syscall.Errno) {

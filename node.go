@@ -188,8 +188,8 @@ func (n *FSNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 func (n *FSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
 	if f == nil {
 		defer n.fixAttr(&out.Attr, "")
-	} else if _, ok := f.(*RemoteFile); !ok {
-		defer n.fixAttr(&out.Attr, "")
+	} else if rf, ok := f.(*RemoteFile); ok {
+		return rf.Getattr(ctx, out)
 	}
 	return n.LoopbackNode.Getattr(ctx, f, out)
 }
@@ -197,8 +197,8 @@ func (n *FSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut
 func (n *FSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
 	if f == nil {
 		defer n.fixAttr(&out.Attr, "")
-	} else if _, ok := f.(*RemoteFile); !ok {
-		defer n.fixAttr(&out.Attr, "")
+	} else if rf, ok := f.(*RemoteFile); ok {
+		return rf.Setattr(ctx, in, out)
 	}
 	return n.LoopbackNode.Setattr(ctx, f, in, out)
 }
