@@ -397,3 +397,36 @@ func TestMountCheckout(t *testing.T) {
 	_ = verifyLocalFile(t, hid, mnt, "normal2.txt")
 	_ = verifyRemoteFile(t, hid, mnt, "emptylarge2.bin")
 }
+
+// 4. As a user, I can write local files in the mounted local repository correctly.
+// 6. As a user, I can commit modified local files using the Git command correctly.
+func TestLocalFileWrite(t *testing.T) {
+	hid, mnt, cancel := cloneMount(t)
+	defer cancel()
+
+	newContent := []byte("new local content")
+	filePath := filepath.Join(mnt, "normal.txt")
+	if err := os.WriteFile(filePath, newContent, 0644); err != nil {
+		t.Fatalf("write local file error: %v", err)
+	}
+
+	mntContent, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("failed to read file from mnt: %v", err)
+	}
+	if string(mntContent) != string(newContent) {
+		t.Fatalf("mnt file content mismatch: got %q, want %q", mntContent, newContent)
+	}
+
+	if _, err := run(mnt, "git", "add", "normal.txt"); err != nil {
+		t.Fatalf("git add error: %v", err)
+	}
+	if _, err := run(mnt, "git", "commit", "-m", "Update normal.txt with new content"); err != nil {
+		t.Fatalf("git commit error: %v", err)
+	}
+	_ = verifyLocalFile(t, hid, mnt, "normal.txt")
+
+	if _, err = run(mnt, "git", "push", "-u", "origin", "main"); err != nil {
+		t.Fatalf("git push error: %v", err)
+	}
+}
