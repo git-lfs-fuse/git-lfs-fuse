@@ -404,6 +404,7 @@ func TestLocalFileWrite(t *testing.T) {
 	hid, mnt, cancel := cloneMount(t)
 	defer cancel()
 
+	// modify normal.txt
 	newContent := []byte("new local content")
 	filePath := filepath.Join(mnt, "normal.txt")
 	if err := os.WriteFile(filePath, newContent, 0644); err != nil {
@@ -418,15 +419,84 @@ func TestLocalFileWrite(t *testing.T) {
 		t.Fatalf("mnt file content mismatch: got %q, want %q", mntContent, newContent)
 	}
 
+	// create new local file
+	newFilePath := filepath.Join(mnt, "normal3.txt")
+	f, err := os.Create(newFilePath)
+	if err != nil {
+		t.Fatalf("create new file error: %v", err)
+	}
+	defer f.Close()
+
 	if _, err := run(mnt, "git", "add", "normal.txt"); err != nil {
 		t.Fatalf("git add error: %v", err)
 	}
-	if _, err := run(mnt, "git", "commit", "-m", "Update normal.txt with new content"); err != nil {
+	if _, err := run(mnt, "git", "commit", "-m", "Modify normal.txt"); err != nil {
 		t.Fatalf("git commit error: %v", err)
 	}
 	_ = verifyLocalFile(t, hid, mnt, "normal.txt")
 
-	if _, err = run(mnt, "git", "push", "-u", "origin", "main"); err != nil {
+	if _, err := run(mnt, "git", "add", "normal3.txt"); err != nil {
+		t.Fatalf("git add error: %v", err)
+	}
+	if _, err := run(mnt, "git", "commit", "-m", "Add normal3.txt"); err != nil {
+		t.Fatalf("git commit error: %v", err)
+	}
+	_ = verifyLocalFile(t, hid, mnt, "normal3.txt")
+
+	if _, err := run(mnt, "git", "push", "-u", "origin", "main"); err != nil {
+		t.Fatalf("git push error: %v", err)
+	}
+}
+
+// 7. As a user, I can write remote files in the mounted local repository correctly.
+// 8. As a user, I can commit modified remote files using the Git command correctly.
+func TestRemoteFileWrite(t *testing.T) {
+	hid, mnt, cancel := cloneMount(t)
+	defer cancel()
+
+	// modify emptylarge.bin
+	newContent := []byte("new remote content")
+	filePath := filepath.Join(mnt, "emptylarge.bin")
+	if err := os.WriteFile(filePath, newContent, 0644); err != nil {
+		t.Fatalf("failed to write remote file: %v", err)
+	}
+
+	mntContent, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("failed to read file from mnt: %v", err)
+	}
+	if string(mntContent) != string(newContent) {
+		t.Fatalf("mnt file content mismatch: got %q, want %q", mntContent, newContent)
+	}
+
+	// create new remote file
+	newFilePath := filepath.Join(mnt, "emptylarge3.bin")
+	f, err := os.Create(newFilePath)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	if err := os.WriteFile(newFilePath, newContent, 0644); err != nil {
+		t.Fatalf("failed to write remote file: %v", err)
+	}
+
+	if _, err := run(mnt, "git", "add", "emptylarge.bin"); err != nil {
+		t.Fatalf("git add error: %v", err)
+	}
+	if _, err := run(mnt, "git", "commit", "-m", "Modify emptylarge.bin"); err != nil {
+		t.Fatalf("git commit error: %v", err)
+	}
+	_ = verifyRemoteFile(t, hid, mnt, "emptylarge.bin")
+
+	if _, err := run(mnt, "git", "add", "emptylarge3.bin"); err != nil {
+		t.Fatalf("git add error: %v", err)
+	}
+	if _, err := run(mnt, "git", "commit", "-m", "Add emptylarge3.bin"); err != nil {
+		t.Fatalf("git commit error: %v", err)
+	}
+	_ = verifyRemoteFile(t, hid, mnt, "emptylarge3.bin")
+
+	if _, err := run(mnt, "git", "push", "-u", "origin", "main"); err != nil {
 		t.Fatalf("git push error: %v", err)
 	}
 }
