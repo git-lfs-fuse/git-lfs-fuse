@@ -57,7 +57,9 @@ var _ = (fs.NodeGetxattrer)((*FSNode)(nil))
 var _ = (fs.NodeSetxattrer)((*FSNode)(nil))
 var _ = (fs.NodeRemovexattrer)((*FSNode)(nil))
 var _ = (fs.NodeListxattrer)((*FSNode)(nil))
-var _ = (fs.NodeCopyFileRanger)((*FSNode)(nil))
+
+// TODO: we may need to implement these:
+//var _ = (fs.NodeCopyFileRanger)((*FSNode)(nil))
 
 func (n *FSNode) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
 	return n.LoopbackNode.Statfs(ctx, out)
@@ -217,12 +219,6 @@ func (n *FSNode) Removexattr(ctx context.Context, attr string) syscall.Errno {
 
 func (n *FSNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscall.Errno) {
 	return n.LoopbackNode.Listxattr(ctx, dest)
-}
-
-func (n *FSNode) CopyFileRange(ctx context.Context, fhIn fs.FileHandle,
-	offIn uint64, out *fs.Inode, fhOut fs.FileHandle, offOut uint64,
-	len uint64, flags uint64) (uint32, syscall.Errno) {
-	return n.LoopbackNode.CopyFileRange(ctx, fhIn, offIn, out, fhOut, offOut, len, flags)
 }
 
 func (n *FSNode) fixAttr(out *fuse.Attr, name string) {
