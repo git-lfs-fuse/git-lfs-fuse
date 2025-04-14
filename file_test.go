@@ -79,10 +79,15 @@ func createRandomRemoteFile(size int64) (*RemoteFile, func()) {
 	if _, err = ptr.Encode(p); err != nil {
 		clean()
 	}
-	file, err := NewRemoteFile(ptr, &fetcher{f: f}, d, int(p.Fd()))
+	s, err := p.Stat()
 	if err != nil {
-		panic(err)
+		clean()
 	}
+	stat, ok := s.Sys().(*syscall.Stat_t)
+	if !ok {
+		clean()
+	}
+	file := NewRemoteFile(ptr, &fetcher{f: f}, d, stat.Ino, int(p.Fd()))
 	return file, clean
 }
 

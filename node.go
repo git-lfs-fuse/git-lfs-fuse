@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -25,10 +26,12 @@ import (
 
 type FSNode struct {
 	fs.LoopbackNode
+	rf map[uint64]*RemoteFile
+	mu sync.RWMutex
 }
 
 type FSNodeData struct {
-	NewRemoteFile func(ptr *lfs.Pointer, fd int) (*RemoteFile, error)
+	NewRemoteFile func(ptr *lfs.Pointer, ino uint64, fd int) *RemoteFile
 	Ignore        bool
 }
 
@@ -57,7 +60,9 @@ var _ = (fs.NodeGetxattrer)((*FSNode)(nil))
 var _ = (fs.NodeSetxattrer)((*FSNode)(nil))
 var _ = (fs.NodeRemovexattrer)((*FSNode)(nil))
 var _ = (fs.NodeListxattrer)((*FSNode)(nil))
-var _ = (fs.NodeCopyFileRanger)((*FSNode)(nil))
+
+// TODO: we may need to implement these:
+//var _ = (fs.NodeCopyFileRanger)((*FSNode)(nil))
 
 func (n *FSNode) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
 	return n.LoopbackNode.Statfs(ctx, out)
@@ -69,7 +74,6 @@ func (n *FSNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*
 }
 
 func (n *FSNode) Mknod(ctx context.Context, name string, mode, rdev uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-	defer n.fixAttr(&out.Attr, name)
 	return n.LoopbackNode.Mknod(ctx, name, mode, rdev, out)
 }
 
@@ -107,29 +111,50 @@ func (n *FSNode) Readlink(ctx context.Context) ([]byte, syscall.Errno) {
 
 func (n *FSNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
 	metadata := n.LoopbackNode.Metadata.(*FSNodeData)
-	if metadata.Ignore ||
-		flags&uint32(os.O_CREATE) == uint32(os.O_CREATE) ||
-		flags&uint32(os.O_TRUNC) == uint32(os.O_TRUNC) {
+	if metadata.Ignore || flags&uint32(os.O_CREATE) != 0 || flags&uint32(os.O_TRUNC) != 0 {
 		return n.LoopbackNode.Open(ctx, flags)
 	}
 
 	p := n.path()
+
+	ino, err := generateFid(p)
+	if err != nil {
+		return nil, 0, fs.ToErrno(err)
+	}
+
+	n.mu.RLock()
+	if rf, ok := n.rf[ino]; ok {
+		rf.Refs.Add(1)
+		n.mu.RUnlock()
+		return rf, 0, 0
+	}
+	n.mu.RUnlock()
 
 	ptr, _ := lfs.DecodePointerFromFile(p)
 	if ptr == nil {
 		return n.LoopbackNode.Open(ctx, flags)
 	}
 
+	// always open remote files for read/write
+	flags &= ^uint32(os.O_RDONLY | os.O_WRONLY | os.O_RDWR)
+	flags |= uint32(os.O_RDWR)
+
 	f, err := syscall.Open(p, int(flags), 0)
 	if err != nil {
 		return nil, 0, fs.ToErrno(err)
 	}
 
-	file, err := metadata.NewRemoteFile(ptr, f)
-	if err != nil {
-		return nil, 0, fs.ToErrno(err)
+	rf := metadata.NewRemoteFile(ptr, ino, f)
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if rf2, ok := n.rf[ino]; ok {
+		rf = rf2
+		_ = syscall.Close(f)
+	} else {
+		n.rf[ino] = rf
 	}
-	return file, 0, 0
+	rf.Refs.Add(1)
+	return rf, 0, 0
 }
 
 func (n *FSNode) Read(ctx context.Context, f fs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
@@ -170,6 +195,15 @@ func (n *FSNode) Flush(ctx context.Context, f fs.FileHandle) syscall.Errno {
 
 func (n *FSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 	if f != nil {
+		if writer, ok := f.(*RemoteFile); ok {
+			n.mu.Lock()
+			defer n.mu.Unlock()
+			if writer.Refs.Add(-1) == 0 {
+				delete(n.rf, writer.Ino)
+				return writer.Release(ctx)
+			}
+			return 0
+		}
 		if writer, ok := f.(fs.FileReleaser); ok {
 			return writer.Release(ctx)
 		}
@@ -186,19 +220,47 @@ func (n *FSNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 }
 
 func (n *FSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	if f == nil {
-		defer n.fixAttr(&out.Attr, "")
-	} else if rf, ok := f.(*RemoteFile); ok {
+	ino, err := generateFid(n.path())
+	if err != nil {
+		return fs.ToErrno(err)
+	}
+	n.mu.RLock()
+	if rf, ok := n.rf[ino]; ok {
+		defer n.mu.RUnlock()
 		return rf.Getattr(ctx, out)
 	}
+	n.mu.RUnlock()
+	defer n.fixAttr(&out.Attr, "")
 	return n.LoopbackNode.Getattr(ctx, f, out)
 }
 
 func (n *FSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
-	if f == nil {
-		defer n.fixAttr(&out.Attr, "")
-	} else if rf, ok := f.(*RemoteFile); ok {
+	p := n.path()
+	ino, err := generateFid(p)
+	if err != nil {
+		return fs.ToErrno(err)
+	}
+	n.mu.RLock()
+	if rf, ok := n.rf[ino]; ok {
+		defer n.mu.RUnlock()
 		return rf.Setattr(ctx, in, out)
+	}
+	n.mu.RUnlock()
+	if metadata := n.Metadata.(*FSNodeData); !n.IsDir() && !metadata.Ignore && in.Size < 1024 {
+		if ptr, _ := lfs.DecodePointerFromFile(p); ptr != nil {
+			f, err := syscall.Open(p, os.O_RDWR, 0)
+			if err != nil {
+				return fs.ToErrno(err)
+			}
+			defer syscall.Close(f)
+			rf := metadata.NewRemoteFile(ptr, ino, f)
+			n.mu.Lock()
+			defer n.mu.Unlock()
+			if rf2, ok := n.rf[ino]; ok {
+				rf = rf2
+			}
+			return rf.Setattr(ctx, in, out)
+		}
 	}
 	return n.LoopbackNode.Setattr(ctx, f, in, out)
 }
@@ -217,12 +279,6 @@ func (n *FSNode) Removexattr(ctx context.Context, attr string) syscall.Errno {
 
 func (n *FSNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscall.Errno) {
 	return n.LoopbackNode.Listxattr(ctx, dest)
-}
-
-func (n *FSNode) CopyFileRange(ctx context.Context, fhIn fs.FileHandle,
-	offIn uint64, out *fs.Inode, fhOut fs.FileHandle, offOut uint64,
-	len uint64, flags uint64) (uint32, syscall.Errno) {
-	return n.LoopbackNode.CopyFileRange(ctx, fhIn, offIn, out, fhOut, offOut, len, flags)
 }
 
 func (n *FSNode) fixAttr(out *fuse.Attr, name string) {
@@ -312,19 +368,15 @@ func NewGitLFSFuseRoot(rootPath string, cfg *config.Configuration) (fs.InodeEmbe
 		manifest:  manifest,
 	}
 
-	newRemoteFile := func(ptr *lfs.Pointer, fd int) (*RemoteFile, error) {
-		rf, err := NewRemoteFile(ptr, pf, pr, fd)
-		if err != nil {
-			return nil, err
-		}
-		return rf, nil
+	newRemoteFile := func(ptr *lfs.Pointer, ino uint64, fd int) *RemoteFile {
+		return NewRemoteFile(ptr, pf, pr, ino, fd)
 	}
 
 	root := &fs.LoopbackRoot{
 		Path: rootPath,
 		Dev:  uint64(st.Dev),
 		NewNode: func(rootData *fs.LoopbackRoot, parent *fs.LoopbackNode, name string, st *syscall.Stat_t) fs.InodeEmbedder {
-			node := &FSNode{LoopbackNode: fs.LoopbackNode{RootData: rootData, Metadata: &FSNodeData{NewRemoteFile: newRemoteFile}}}
+			node := &FSNode{rf: make(map[uint64]*RemoteFile), LoopbackNode: fs.LoopbackNode{RootData: rootData, Metadata: &FSNodeData{NewRemoteFile: newRemoteFile}}}
 			if (parent != nil && parent.Metadata.(*FSNodeData).Ignore) || name == ".git" {
 				node.Metadata.(*FSNodeData).Ignore = true
 			}
