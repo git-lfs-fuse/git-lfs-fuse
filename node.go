@@ -227,6 +227,7 @@ func (n *FSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut
 	n.mu.RLock()
 	if rf, ok := n.rf[ino]; ok {
 		defer n.mu.RUnlock()
+		defer n.fixAttr(&out.Attr, "")
 		return rf.Getattr(ctx, out)
 	}
 	n.mu.RUnlock()
@@ -243,6 +244,7 @@ func (n *FSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrI
 	n.mu.RLock()
 	if rf, ok := n.rf[ino]; ok {
 		defer n.mu.RUnlock()
+		defer n.fixAttr(&out.Attr, "")
 		return rf.Setattr(ctx, in, out)
 	}
 	n.mu.RUnlock()
@@ -259,6 +261,7 @@ func (n *FSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrI
 			if rf2, ok := n.rf[ino]; ok {
 				rf = rf2
 			}
+			defer n.fixAttr(&out.Attr, "")
 			return rf.Setattr(ctx, in, out)
 		}
 	}

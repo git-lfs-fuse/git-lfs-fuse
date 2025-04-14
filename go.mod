@@ -7,11 +7,11 @@ replace github.com/hanwen/go-fuse/v2 v2.7.3-0.20250116065539-aa9c5164721d => git
 require (
 	github.com/git-lfs-fuse/lfs-test-server v0.5.0-dev4
 	github.com/git-lfs/git-lfs/v3 v3.6.1-0.20250114181820-a8bf08074988
-	github.com/go-git/go-git/v5 v5.13.2
+	github.com/go-git/go-git/v5 v5.15.0
 	github.com/hanwen/go-fuse/v2 v2.7.3-0.20250116065539-aa9c5164721d
 	github.com/maypok86/otter v1.2.4
-	github.com/spf13/cobra v1.8.1
-	github.com/spf13/pflag v1.0.5
+	github.com/spf13/cobra v1.9.1
+	github.com/spf13/pflag v1.0.6
 )
 
 require (
@@ -43,8 +43,8 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/rubyist/tracerx v0.0.0-20170927163412-787959303086 // indirect
 	github.com/ssgelm/cookiejarparser v1.0.1 // indirect
-	golang.org/x/crypto v0.32.0 // indirect
-	golang.org/x/net v0.34.0 // indirect
-	golang.org/x/sys v0.30.0 // indirect
-	golang.org/x/text v0.21.0 // indirect
+	golang.org/x/crypto v0.37.0 // indirect
+	golang.org/x/net v0.39.0 // indirect
+	golang.org/x/sys v0.32.0 // indirect
+	golang.org/x/text v0.24.0 // indirect
 )
