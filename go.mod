@@ -2,7 +2,7 @@ module github.com/git-lfs-fuse/git-lfs-fuse
 
 go 1.23.4
 
-replace github.com/hanwen/go-fuse/v2 v2.7.3-0.20250116065539-aa9c5164721d => github.com/git-lfs-fuse/go-fuse/v2 v2.7.4-dev8
+replace github.com/hanwen/go-fuse/v2 v2.7.3-0.20250116065539-aa9c5164721d => github.com/git-lfs-fuse/go-fuse/v2 v2.7.4-dev11
 
 require (
 	github.com/git-lfs-fuse/lfs-test-server v0.5.0-dev4
