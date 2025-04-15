@@ -38,7 +38,7 @@ type pageFetcher struct {
 	mu        sync.Mutex
 	lru       DoubleLRU
 	maxPages  int64
-	pr 		  string
+	pr        string
 }
 
 func (p *pageFetcher) getAction(ctx context.Context, ptr *lfs.Pointer) (action, error) {
