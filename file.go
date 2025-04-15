@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/git-lfs/git-lfs/v3/lfs"
@@ -15,55 +16,46 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 )
 
-func generateFid(path string) (string, error) {
+func generateFid(path string) (uint64, error) {
 	fi, err := os.Stat(path)
 	if err != nil {
-		return "", err
+		return 0, err
 	}
 
 	stat, ok := fi.Sys().(*syscall.Stat_t)
 	if !ok {
-		return "", errors.New("failed to get inode from fi")
+		return 0, errors.New("failed to get inode from fi")
 	}
-	return strconv.FormatUint(stat.Ino, 10), nil
+	return stat.Ino, nil
 }
 
-func NewRemoteFile(ptr *lfs.Pointer, pf PageFetcher, pr string, fd int) (*RemoteFile, error) {
-	fid, err := generateFid(pr)
-	if err != nil {
-		return nil, err
-	}
-
+func NewRemoteFile(ptr *lfs.Pointer, pf PageFetcher, pr string, ino uint64, fd int) *RemoteFile {
 	ps := filepath.Join(pr, ptr.Oid, "shared")
-	pr = filepath.Join(pr, ptr.Oid, fid)
+	pr = filepath.Join(pr, ptr.Oid, strconv.FormatUint(ino, 10))
 
 	bs, err := os.ReadFile(filepath.Join(pr, "tc"))
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	}
 	tc, err := strconv.ParseInt(string(bs), 10, 64)
 	if err != nil {
 		tc = ptr.Size
 	}
 	bs, err = os.ReadFile(filepath.Join(ps, "tc"))
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	}
 	sz, err := strconv.ParseInt(string(bs), 10, 64)
 	if err != nil {
 		sz = ptr.Size
 	}
-	return &RemoteFile{ptr: ptr, pf: pf, ps: ps, pr: pr, tc: tc, sz: sz, LoopbackFile: fs.LoopbackFile{Fd: fd}}, nil
+	return &RemoteFile{ptr: ptr, pf: pf, ps: ps, pr: pr, tc: tc, sz: sz, Ino: ino, LoopbackFile: fs.LoopbackFile{Fd: fd}}
 }
 
 type RemoteFile struct {
-	ptr *lfs.Pointer
-	pf  PageFetcher
-	ps  string // directory of shared pages
-	pr  string // root for pages
-	tc  int64  // keep track of truncate operations. This is persisted to the tc file.
-	sz  int64  // the original file size
-	mu  sync.RWMutex
+	ptr  *lfs.Pointer
+	pf   PageFetcher
+	ps   string // directory of shared pages
+	pr   string // root for pages
+	tc   int64  // keep track of truncate operations. This is persisted to the tc file.
+	sz   int64  // the original file size
+	mu   sync.RWMutex
+	Ino  uint64       // inode number
+	Refs atomic.Int64 // reference count
 	fs.LoopbackFile
 }
 
@@ -286,7 +278,31 @@ func (f *RemoteFile) Release(ctx context.Context) syscall.Errno {
 }
 
 func (f *RemoteFile) Flush(ctx context.Context) syscall.Errno {
-	return f.LoopbackFile.Flush(ctx)
+	var attr fuse.AttrOut
+	// TODO: can we cache the attr?
+	err := f.LoopbackFile.Getattr(ctx, &attr)
+	if err != 0 {
+		return err
+	}
+	bs := []byte(f.ptr.Encoded())
+	n, err := f.LoopbackFile.Write(ctx, bs, 0)
+	if int(n) != len(bs) {
+		return err
+	}
+	attrIn := &fuse.SetAttrIn{
+		SetAttrInCommon: fuse.SetAttrInCommon{
+			Size:      uint64(len(bs)),
+			Atime:     attr.Atime,
+			Mtime:     attr.Mtime,
+			Ctime:     attr.Ctime,
+			Atimensec: attr.Atimensec,
+			Mtimensec: attr.Mtimensec,
+			Ctimensec: attr.Ctimensec,
+			Mode:      attr.Mode,
+			Owner:     attr.Owner,
+		},
+	}
+	return f.LoopbackFile.Setattr(ctx, attrIn, &attr)
 }
 
 func (f *RemoteFile) Fsync(ctx context.Context, flags uint32) (errno syscall.Errno) {
