@@ -72,12 +72,12 @@ func startLFS(dir string) (net.Listener, error) {
 }
 
 func prepareRepo() (r *repository, err error) {
-	// Logging wrapper for Git commands
-	logRun := func(tmp string, args ...string) error {
-		log.Printf("Running: git %s", strings.Join(args, " "))
-		out, err := run(tmp, "git", args...)
+	// Logging wrapper for shell commands
+	logRun := func(label string, cmd string, args ...string) error {
+		log.Printf("Running [%s]: %s %s", label, cmd, strings.Join(args, " "))
+		out, err := run("", cmd, args...)
 		if err != nil {
-			log.Printf("FAILED: git %s\nError: %v\nOutput: %s", strings.Join(args, " "), err, out)
+			log.Printf("FAILED [%s]: %v\nOutput: %s", label, err, out)
 		}
 		return err
 	}
@@ -130,7 +130,7 @@ func prepareRepo() (r *repository, err error) {
 	}
 	_ = f.Close()
 
-	if err = logRun(tmp, "init", "--initial-branch=main"); err != nil {
+	if err = logRun("git init", "git", "init", "--initial-branch=main"); err != nil {
 		return
 	}
 
@@ -144,19 +144,19 @@ func prepareRepo() (r *repository, err error) {
 		return
 	}
 
-	if err = logRun(tmp, "lfs", "track", "*.bin"); err != nil {
+	if err = logRun("git lfs track", "git", "lfs", "track", "*.bin"); err != nil {
 		return
 	}
-	if err = logRun(tmp, "add", "-A"); err != nil {
+	if err = logRun("git add", "git", "add", "-A"); err != nil {
 		return
 	}
-	if err = logRun(tmp, "config", "user.email", "testuser@example.com"); err != nil {
+	if err = logRun("git config email", "git", "config", "user.email", "testuser@example.com"); err != nil {
 		return
 	}
-	if err = logRun(tmp, "config", "user.name", "testuser"); err != nil {
+	if err = logRun("git config name", "git", "config", "user.name", "testuser"); err != nil {
 		return
 	}
-	if err = logRun(tmp, "commit", "-m", "msg"); err != nil {
+	if err = logRun("git commit", "git", "commit", "-m", "msg"); err != nil {
 		return
 	}
 
@@ -166,13 +166,14 @@ func prepareRepo() (r *repository, err error) {
 		return
 	}
 	r.repo = filepath.Join(remote, "repo.git")
-	if err = logRun(tmp, "init", "--bare", r.repo, "--initial-branch=main"); err != nil {
+
+	if err = logRun("git init bare", "git", "init", "--bare", r.repo, "--initial-branch=main"); err != nil {
 		return
 	}
-	if err = logRun(tmp, "remote", "add", "origin", r.repo); err != nil {
+	if err = logRun("git remote add", "git", "remote", "add", "origin", r.repo); err != nil {
 		return
 	}
-	if err = logRun(tmp, "push", "-u", "origin", "main"); err != nil {
+	if err = logRun("git push", "git", "push", "-u", "origin", "main"); err != nil {
 		return
 	}
 
