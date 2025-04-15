@@ -21,8 +21,8 @@ import (
 )
 
 type action struct {
-	Href          string
 	Header        map[string]string
+	Href          string
 	Authenticated bool
 }
 
@@ -31,14 +31,14 @@ type PageFetcher interface {
 }
 
 type pageFetcher struct {
-	remote    string
+	manifest  tq.Manifest
+	lru       DoubleLRU
 	actions   *otter.CacheWithVariableTTL[string, action]
 	remoteRef *git.Ref
-	manifest  tq.Manifest
-	mu        sync.Mutex
-	lru       DoubleLRU
-	maxPages  int64
+	remote    string
 	pr        string
+	maxPages  int64
+	mu        sync.Mutex
 }
 
 func (p *pageFetcher) getAction(ctx context.Context, ptr *lfs.Pointer) (action, error) {

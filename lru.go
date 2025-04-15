@@ -16,15 +16,11 @@ type DoubleLRU interface {
 	First() (string, string)
 }
 
-// -------------------- Generic Node --------------------
-
 type Node struct {
-	key  string
 	prev *Node
 	next *Node
+	key  string
 }
-
-// -------------------- LRUList (for oid and pageNum) --------------------
 
 type LRUList struct {
 	items map[string]*Node
@@ -37,7 +33,6 @@ func NewLRUList() *LRUList {
 	tail := &Node{}
 	head.next = tail
 	tail.prev = head
-
 	return &LRUList{
 		items: make(map[string]*Node),
 		head:  head,
@@ -79,8 +74,6 @@ func (lru *LRUList) Len() int {
 	return len(lru.items)
 }
 
-// -------------------- internal list helpers --------------------
-
 func (lru *LRUList) unlink(node *Node) {
 	node.prev.next = node.next
 	node.next.prev = node.prev
@@ -98,17 +91,14 @@ func (lru *LRUList) moveToBack(node *Node) {
 	lru.insertToBack(node)
 }
 
-// -------------------- Double LRU --------------------
-
 type oidEntry struct {
 	pages *LRUList
 }
-
 type doubleLRU struct {
 	oidList    *LRUList
 	oidMap     map[string]*oidEntry
-	size       int64
 	lruLogPath string
+	size       int64
 	doLog      bool
 }
 
@@ -137,7 +127,6 @@ func (d *doubleLRU) replayLog() error {
 		return err
 	}
 	defer file.Close()
-
 	scanner := bufio.NewScanner(file)
 	// TODO: Check whether the line is complete
 	for scanner.Scan() {
@@ -158,7 +147,6 @@ func (d *doubleLRU) replayLog() error {
 			return errors.New("Invald operation " + op)
 		}
 	}
-
 	if err := scanner.Err(); err != nil {
 		return err
 	}
