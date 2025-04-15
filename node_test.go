@@ -72,7 +72,6 @@ func startLFS(dir string) (net.Listener, error) {
 }
 
 func prepareRepo() (r *repository, err error) {
-	// Simplified logging wrapper for Git commands
 	logRun := func(dir string, cmd string, args ...string) error {
 		log.Printf("Running: %s %s", cmd, strings.Join(args, " "))
 		out, err := run(dir, cmd, args...)
