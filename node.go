@@ -335,7 +335,7 @@ func (n *FSNode) path() string {
 	return filepath.Join(n.RootData.Path, n.Path(n.root()))
 }
 
-func NewGitLFSFuseRoot(rootPath string, cfg *config.Configuration) (fs.InodeEmbedder, error) {
+func NewGitLFSFuseRoot(rootPath string, cfg *config.Configuration, maxPages int64) (fs.InodeEmbedder, error) {
 	var st syscall.Stat_t
 	if err := syscall.Stat(rootPath, &st); err != nil {
 		return nil, err
@@ -364,11 +364,20 @@ func NewGitLFSFuseRoot(rootPath string, cfg *config.Configuration) (fs.InodeEmbe
 		return nil, err
 	}
 
+	lruLogPath := filepath.Join(pr, "lru.log")
+	lru, err := NewDoubleLRU(lruLogPath)
+	if err != nil {
+		return nil, err
+	}
+
 	pf := &pageFetcher{
 		remote:    cfg.Remote(),
 		actions:   &actions,
 		remoteRef: gref,
 		manifest:  manifest,
+		pr:        pr,
+		lru:       lru,
+		maxPages:  maxPages,
 	}
 
 	pl := &plock{lk: make(map[string]*lock)}
@@ -406,7 +415,7 @@ func (s *Server) Close() {
 	s.svc.Wait()
 }
 
-func CloneMount(remote, mountPoint string, directMount bool, gitOptions []string) (string, string, *Server, error) {
+func CloneMount(remote, mountPoint string, directMount bool, gitOptions []string, maxPages int64) (string, string, *Server, error) {
 	dst := strings.TrimSuffix(filepath.Base(remote), ".git")
 	dir, err := filepath.Abs(".")
 	if mountPoint != "" {
@@ -451,7 +460,7 @@ func CloneMount(remote, mountPoint string, directMount bool, gitOptions []string
 		return "", "", nil, fmt.Errorf("%s is not a directory", hid)
 	}
 
-	pxy, err := NewGitLFSFuseRoot(hid, cfg)
+	pxy, err := NewGitLFSFuseRoot(hid, cfg, maxPages)
 	if err != nil {
 		return "", "", nil, err
 	}
