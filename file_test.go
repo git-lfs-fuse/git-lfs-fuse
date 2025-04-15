@@ -87,7 +87,8 @@ func createRandomRemoteFile(size int64) (*RemoteFile, func()) {
 	if !ok {
 		clean()
 	}
-	file := NewRemoteFile(ptr, &fetcher{f: f}, d, stat.Ino, int(p.Fd()))
+	pl := &plock{lk: make(map[string]*lock)}
+	file := NewRemoteFile(ptr, pl, &fetcher{f: f}, d, stat.Ino, int(p.Fd()))
 	return file, clean
 }
 

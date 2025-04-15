@@ -29,7 +29,7 @@ func generateFid(path string) (uint64, error) {
 	return stat.Ino, nil
 }
 
-func NewRemoteFile(ptr *lfs.Pointer, pf PageFetcher, pr string, ino uint64, fd int) *RemoteFile {
+func NewRemoteFile(ptr *lfs.Pointer, pl *plock, pf PageFetcher, pr string, ino uint64, fd int) *RemoteFile {
 	ps := filepath.Join(pr, ptr.Oid, "shared")
 	pr = filepath.Join(pr, ptr.Oid, strconv.FormatUint(ino, 10))
 
@@ -43,11 +43,12 @@ func NewRemoteFile(ptr *lfs.Pointer, pf PageFetcher, pr string, ino uint64, fd i
 	if err != nil {
 		sz = ptr.Size
 	}
-	return &RemoteFile{ptr: ptr, pf: pf, ps: ps, pr: pr, tc: tc, sz: sz, Ino: ino, LoopbackFile: fs.LoopbackFile{Fd: fd}}
+	return &RemoteFile{ptr: ptr, pl: pl, pf: pf, ps: ps, pr: pr, tc: tc, sz: sz, Ino: ino, LoopbackFile: fs.LoopbackFile{Fd: fd}}
 }
 
 type RemoteFile struct {
 	ptr  *lfs.Pointer
+	pl   *plock
 	pf   PageFetcher
 	ps   string // directory of shared pages
 	pr   string // root for pages
@@ -143,6 +144,11 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, i
 	page, err := os.OpenFile(pagePth, os.O_RDWR, 0666)
 	if errors.Is(err, os.ErrNotExist) {
 		destPth := filepath.Join(f.ps, pageStr)
+		f.pl.Lock(destPth)
+		defer f.pl.Unlock(destPth)
+		if page, err = os.OpenFile(pagePth, os.O_RDWR, 0666); err == nil {
+			return page, pageOff, pageEnd - pageOff, nil
+		}
 		err = createSymlink(pagePth, destPth)
 		if pageOff < f.tc && errors.Is(err, os.ErrNotExist) {
 			dest, err := createFile(destPth)

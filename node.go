@@ -371,8 +371,10 @@ func NewGitLFSFuseRoot(rootPath string, cfg *config.Configuration) (fs.InodeEmbe
 		manifest:  manifest,
 	}
 
+	pl := &plock{lk: make(map[string]*lock)}
+
 	newRemoteFile := func(ptr *lfs.Pointer, ino uint64, fd int) *RemoteFile {
-		return NewRemoteFile(ptr, pf, pr, ino, fd)
+		return NewRemoteFile(ptr, pl, pf, pr, ino, fd)
 	}
 
 	root := &fs.LoopbackRoot{
