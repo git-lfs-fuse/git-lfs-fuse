@@ -36,7 +36,6 @@ type pageFetcher struct {
 	remoteRef *git.Ref
 	manifest  tq.Manifest
 	mu        sync.Mutex
-	cacheDir  string
 	lru       DoubleLRU
 	maxPages  int64
 	pr 		  string
