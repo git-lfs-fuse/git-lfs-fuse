@@ -3,10 +3,12 @@ package gitlfsfuse
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"log"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	lts "github.com/git-lfs-fuse/lfs-test-server"
@@ -70,6 +72,16 @@ func startLFS(dir string) (net.Listener, error) {
 }
 
 func prepareRepo() (r *repository, err error) {
+	// Logging wrapper for Git commands
+	logRun := func(tmp string, args ...string) error {
+		log.Printf("Running: git %s", strings.Join(args, " "))
+		out, err := run(tmp, "git", args...)
+		if err != nil {
+			log.Printf("FAILED: git %s\nError: %v\nOutput: %s", strings.Join(args, " "), err, out)
+		}
+		return err
+	}
+
 	r = &repository{}
 	defer func() {
 		if r != nil && err != nil {
@@ -118,9 +130,10 @@ func prepareRepo() (r *repository, err error) {
 	}
 	_ = f.Close()
 
-	if _, err = run(tmp, "git", "init", "--initial-branch=main"); err != nil {
+	if err = logRun(tmp, "init", "--initial-branch=main"); err != nil {
 		return
 	}
+
 	cfg := config.NewIn(tmp, "")
 	lfo := lfs.FilterOptions{
 		GitConfig: cfg.GitConfig(),
@@ -130,19 +143,20 @@ func prepareRepo() (r *repository, err error) {
 	if err = lfo.Install(); err != nil {
 		return
 	}
-	if _, err = run(tmp, "git", "lfs", "track", "*.bin"); err != nil {
+
+	if err = logRun(tmp, "lfs", "track", "*.bin"); err != nil {
 		return
 	}
-	if _, err = run(tmp, "git", "add", "-A"); err != nil {
+	if err = logRun(tmp, "add", "-A"); err != nil {
 		return
 	}
-	if _, err = run(tmp, "git", "config", "user.email", "testuser@example.com"); err != nil {
+	if err = logRun(tmp, "config", "user.email", "testuser@example.com"); err != nil {
 		return
 	}
-	if _, err = run(tmp, "git", "config", "user.name", "testuser"); err != nil {
+	if err = logRun(tmp, "config", "user.name", "testuser"); err != nil {
 		return
 	}
-	if _, err = run(tmp, "git", "commit", "-m", "msg"); err != nil {
+	if err = logRun(tmp, "commit", "-m", "msg"); err != nil {
 		return
 	}
 
@@ -152,15 +166,16 @@ func prepareRepo() (r *repository, err error) {
 		return
 	}
 	r.repo = filepath.Join(remote, "repo.git")
-	if _, err = run(tmp, "git", "init", "--bare", r.repo, "--initial-branch=main"); err != nil {
+	if err = logRun(tmp, "init", "--bare", r.repo, "--initial-branch=main"); err != nil {
 		return
 	}
-	if _, err = run(tmp, "git", "remote", "add", "origin", r.repo); err != nil {
+	if err = logRun(tmp, "remote", "add", "origin", r.repo); err != nil {
 		return
 	}
-	if _, err = run(tmp, "git", "push", "-u", "origin", "main"); err != nil {
+	if err = logRun(tmp, "push", "-u", "origin", "main"); err != nil {
 		return
 	}
+
 	return r, nil
 }
 
