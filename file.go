@@ -102,18 +102,15 @@ func replaceLinkFile(path string) (*os.File, error) {
 	}
 
 	dest, err := os.Open(path) // open the dest file by following the link.
-	if errors.Is(err, os.ErrNotExist) {
-		_ = os.Remove(path) // remove the path which is a broken link.
-		return createFile(path)
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	defer dest.Close()
-
-	_ = os.Remove(path) // remove the link.
+	if dest != nil {
+		defer dest.Close()
+	}
+	_ = os.Remove(path)
 	file, err := createFile(path)
-	if err == nil {
+	if err == nil && dest != nil {
 		if _, err = io.Copy(file, dest); err != nil {
 			_ = file.Close()
 			_ = os.Remove(path)
@@ -183,20 +180,18 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, i
 
 func (f *RemoteFile) getPageForWrite(ctx context.Context, off int64) (*os.File, int64, int64, error) {
 	page, pageOff, size, err := f.getPage(ctx, off)
-	if err != nil {
-		return nil, 0, 0, err
-	}
-	_ = page.Close()
-
-	pageNum := off / pagesize
-	pageStr := strconv.Itoa(int(pageNum))
-	pagePth := filepath.Join(f.pr, pageStr)
-	page, err = replaceLinkFile(pagePth)
 	if err == nil {
-		err = page.Truncate(pagesize)
-		if err != nil {
-			_ = page.Close()
-			_ = os.Remove(pagePth)
+		_ = page.Close()
+		pageNum := off / pagesize
+		pageStr := strconv.Itoa(int(pageNum))
+		pagePth := filepath.Join(f.pr, pageStr)
+		page, err = replaceLinkFile(pagePth)
+		if err == nil {
+			err = page.Truncate(pagesize)
+			if err != nil {
+				_ = page.Close()
+				_ = os.Remove(pagePth)
+			}
 		}
 	}
 	return page, pageOff, size, err
@@ -206,27 +201,26 @@ func (f *RemoteFile) Read(ctx context.Context, buf []byte, off int64) (res fuse.
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
-	var readn int
+	var readn, n int
 	var bufbk = buf
 next:
 	page, pageOff, size, err := f.getPage(ctx, off)
-	if err != nil {
-		return fuse.ReadResultData(bufbk[:readn]), fs.ToErrno(err)
-	}
-	shiftOff := off - pageOff
-	n, err := page.ReadAt(buf[:min(int64(len(buf)), size-shiftOff)], shiftOff)
-	readn += n
-	if readn == len(bufbk) || off+int64(n) >= f.ptr.Size {
+	if err == nil {
+		shiftOff := off - pageOff
+		n, err = page.ReadAt(buf[:min(int64(len(buf)), size-shiftOff)], shiftOff)
+		readn += n
+		if readn == len(bufbk) || off+int64(n) >= f.ptr.Size {
+			goto ret
+		}
+		if err == nil && n > 0 {
+			buf = buf[n:]
+			off += int64(n)
+			_ = page.Close()
+			goto next
+		}
+	ret:
 		_ = page.Close()
-		return fuse.ReadResultData(bufbk[:readn]), fs.OK
 	}
-	if err == nil && n > 0 {
-		buf = buf[n:]
-		off += int64(n)
-		_ = page.Close()
-		goto next
-	}
-	_ = page.Close()
 	return fuse.ReadResultData(bufbk[:readn]), fs.ToErrno(err)
 }
 
