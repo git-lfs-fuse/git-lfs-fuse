@@ -475,9 +475,8 @@ func TestLocalFileWrite(t *testing.T) {
 	}
 	remoteURL = strings.TrimSpace(remoteURL)
 
-	cloneCmd := exec.Command("git", "clone", remoteURL, cloneDir)
-	cloneCmd.Dir = mnt
-	if out, err := cloneCmd.CombinedOutput(); err != nil {
+	out, err := run(mnt, "git", "clone", remoteURL, cloneDir)
+	if err != nil {
 		t.Fatalf("git clone error: %v\nOutput: %s", err, out)
 	}
 
@@ -566,9 +565,8 @@ func TestRemoteFileWrite(t *testing.T) {
 	}
 	remoteURL = strings.TrimSpace(remoteURL)
 
-	cloneCmd := exec.Command("git", "clone", remoteURL, cloneDir)
-	cloneCmd.Dir = mnt
-	if out, err := cloneCmd.CombinedOutput(); err != nil {
+	out, err := run(mnt, "git", "clone", remoteURL, cloneDir)
+	if err != nil {
 		t.Fatalf("git clone error: %v\nOutput: %s", err, out)
 	}
 
