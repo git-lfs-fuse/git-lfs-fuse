@@ -462,8 +462,7 @@ func TestLocalFileWrite(t *testing.T) {
 		t.Fatalf("git push error: %v", err)
 	}
 
-	// TODO check from remote
-	// Clone the bare remote repository to verify the pushed content.
+	// Clone the remote repository to verify the pushed content.
 	cloneDir, err := os.MkdirTemp("", "remote-check")
 	if err != nil {
 		t.Fatalf("MkdirTemp error: %v", err)
@@ -495,7 +494,7 @@ func TestLocalFileWrite(t *testing.T) {
 	}
 	remoteNormal3, err := os.ReadFile(filepath.Join(cloneDir, "normal3.txt"))
 	if err != nil {
-		t.Fatalf("failed to read normal.txt from remote clone: %v", err)
+		t.Fatalf("failed to read normal3.txt from remote clone: %v", err)
 	}
 	if len(remoteNormal3) != 0 {
 		t.Fatalf("remote normal3.txt content mismatch: expected empty file, got %q", remoteNormal3)
@@ -528,9 +527,6 @@ func TestRemoteFileWrite(t *testing.T) {
 		return
 	}
 	defer f.Close()
-	if err := os.WriteFile(newFilePath, newContent, 0644); err != nil {
-		t.Fatalf("failed to write remote file: %v", err)
-	}
 
 	if _, err := run(mnt, "git", "add", "emptylarge.bin"); err != nil {
 		t.Fatalf("git add error: %v", err)
@@ -560,5 +556,41 @@ func TestRemoteFileWrite(t *testing.T) {
 	_ = verifyRemoteFile(t, hid, mnt, "emptylarge.bin")
 	_ = verifyRemoteFile(t, hid, mnt, "emptylarge3.bin")
 
-	// TODO check from remote (check pointer file)
+	// Clone the remote repository to verify the pushed content.
+	cloneDir, err := os.MkdirTemp("", "remote-check")
+	if err != nil {
+		t.Fatalf("MkdirTemp error: %v", err)
+	}
+	defer os.RemoveAll(cloneDir)
+
+	remoteURL, err := run(mnt, "git", "remote", "get-url", "origin")
+	if err != nil {
+		t.Fatalf("failed to get remote URL: %v", err)
+	}
+	remoteURL = strings.TrimSpace(remoteURL)
+
+	cloneCmd := exec.Command("git", "clone", remoteURL, cloneDir)
+	cloneCmd.Dir = mnt
+	if out, err := cloneCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git clone error: %v\nOutput: %s", err, out)
+	}
+
+	remoteLarge, err := os.ReadFile(filepath.Join(cloneDir, "emptylarge.bin"))
+	if err != nil {
+		t.Fatalf("failed to read emptylarge.bin from remote clone: %v", err)
+	}
+	if string(remoteLarge) != string(newContent) {
+		t.Fatalf("remote emptylarge.bin content mismatch: got %q, want %q", remoteLarge, newContent)
+	}
+
+	if _, err := os.Stat(filepath.Join(cloneDir, "emptylarge3.bin")); err != nil {
+		t.Fatalf("emptylarge3.bin.txt not found in remote clone: %v", err)
+	}
+	remoteLarge3, err := os.ReadFile(filepath.Join(cloneDir, "emptylarge3.bin"))
+	if err != nil {
+		t.Fatalf("failed to read emptylarge3.bin from remote clone: %v", err)
+	}
+	if len(remoteLarge3) != 0 {
+		t.Fatalf("remote emptylarge3.bin content mismatch: expected empty file, got %q", remoteLarge3)
+	}
 }
