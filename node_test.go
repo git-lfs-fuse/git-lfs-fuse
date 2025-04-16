@@ -415,8 +415,6 @@ func TestMountCheckout(t *testing.T) {
 	_ = verifyRemoteFile(t, hid, mnt, "emptylarge2.bin")
 }
 
-// 4. As a user, I can write local files in the mounted local repository correctly.
-// 6. As a user, I can commit modified local files using the Git command correctly.
 func TestLocalFileWrite(t *testing.T) {
 	hid, mnt, cancel := cloneMount(t)
 	defer cancel()
@@ -463,10 +461,47 @@ func TestLocalFileWrite(t *testing.T) {
 	if _, err := run(mnt, "git", "push", "-u", "origin", "main"); err != nil {
 		t.Fatalf("git push error: %v", err)
 	}
+
+	// TODO check from remote
+	// Clone the bare remote repository to verify the pushed content.
+	cloneDir, err := os.MkdirTemp("", "remote-check")
+	if err != nil {
+		t.Fatalf("MkdirTemp error: %v", err)
+	}
+	defer os.RemoveAll(cloneDir)
+
+	remoteURL, err := run(mnt, "git", "remote", "get-url", "origin")
+	if err != nil {
+		t.Fatalf("failed to get remote URL: %v", err)
+	}
+	remoteURL = strings.TrimSpace(remoteURL)
+
+	cloneCmd := exec.Command("git", "clone", remoteURL, cloneDir)
+	cloneCmd.Dir = mnt
+	if out, err := cloneCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git clone error: %v\nOutput: %s", err, out)
+	}
+
+	remoteNormal, err := os.ReadFile(filepath.Join(cloneDir, "normal.txt"))
+	if err != nil {
+		t.Fatalf("failed to read normal.txt from remote clone: %v", err)
+	}
+	if string(remoteNormal) != string(newContent) {
+		t.Fatalf("remote normal.txt content mismatch: got %q, want %q", remoteNormal, newContent)
+	}
+
+	if _, err := os.Stat(filepath.Join(cloneDir, "normal3.txt")); err != nil {
+		t.Fatalf("normal3.txt not found in remote clone: %v", err)
+	}
+	remoteNormal3, err := os.ReadFile(filepath.Join(cloneDir, "normal3.txt"))
+	if err != nil {
+		t.Fatalf("failed to read normal.txt from remote clone: %v", err)
+	}
+	if len(remoteNormal3) != 0 {
+		t.Fatalf("remote normal3.txt content mismatch: expected empty file, got %q", remoteNormal3)
+	}
 }
 
-// 7. As a user, I can write remote files in the mounted local repository correctly.
-// 8. As a user, I can commit modified remote files using the Git command correctly.
 func TestRemoteFileWrite(t *testing.T) {
 	hid, mnt, cancel := cloneMount(t)
 	defer cancel()
@@ -524,4 +559,6 @@ func TestRemoteFileWrite(t *testing.T) {
 
 	_ = verifyRemoteFile(t, hid, mnt, "emptylarge.bin")
 	_ = verifyRemoteFile(t, hid, mnt, "emptylarge3.bin")
+
+	// TODO check from remote (check pointer file)
 }
