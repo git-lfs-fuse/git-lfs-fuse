@@ -489,9 +489,6 @@ func TestLocalFileWrite(t *testing.T) {
 		t.Fatalf("remote normal.txt content mismatch: got %q, want %q", remoteNormal, newContent)
 	}
 
-	if _, err := os.Stat(filepath.Join(cloneDir, "normal3.txt")); err != nil {
-		t.Fatalf("normal3.txt not found in remote clone: %v", err)
-	}
 	remoteNormal3, err := os.ReadFile(filepath.Join(cloneDir, "normal3.txt"))
 	if err != nil {
 		t.Fatalf("failed to read normal3.txt from remote clone: %v", err)
@@ -583,9 +580,6 @@ func TestRemoteFileWrite(t *testing.T) {
 		t.Fatalf("remote emptylarge.bin content mismatch: got %q, want %q", remoteLarge, newContent)
 	}
 
-	if _, err := os.Stat(filepath.Join(cloneDir, "emptylarge3.bin")); err != nil {
-		t.Fatalf("emptylarge3.bin.txt not found in remote clone: %v", err)
-	}
 	remoteLarge3, err := os.ReadFile(filepath.Join(cloneDir, "emptylarge3.bin"))
 	if err != nil {
 		t.Fatalf("failed to read emptylarge3.bin from remote clone: %v", err)
