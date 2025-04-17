@@ -589,6 +589,7 @@ func TestLimitedCacheSize(t *testing.T) {
 	// Get initial page count
 	initialPages := countSharedPages()
 	totalInitialPages := 0
+	
 	for _, count := range initialPages {
 		totalInitialPages += count
 	}
