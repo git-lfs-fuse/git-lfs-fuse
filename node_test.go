@@ -3,6 +3,7 @@ package gitlfsfuse
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -240,6 +241,10 @@ func prepareRepo() (r *repository, err error) {
 }
 
 func cloneMount(t *testing.T) (hid, repo string, cancel func()) {
+	return cloneMountWithCacheSize(t, 5120)
+}
+
+func cloneMountWithCacheSize(t *testing.T, maxPage int64) (hid, repo string, cancel func()) {
 	var r *repository
 	var mnt string
 	var svc *Server
@@ -271,7 +276,7 @@ func cloneMount(t *testing.T) (hid, repo string, cancel func()) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hid, repo, svc, err = CloneMount(r.repo, filepath.Join(mnt, "repo"), false, nil, 5120)
+	hid, repo, svc, err = CloneMount(r.repo, filepath.Join(mnt, "repo"), false, nil, maxPage)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -524,4 +529,167 @@ func TestRemoteFileWrite(t *testing.T) {
 
 	_ = verifyRemoteFile(t, hid, mnt, "emptylarge.bin")
 	_ = verifyRemoteFile(t, hid, mnt, "emptylarge3.bin")
+}
+
+// 10. As a user, I can access remote Git-LFS tracked files without storing them entirely locally by specifying the cache size.
+func TestLimitedCacheSize(t *testing.T) {
+	// Set a very small cache size (2 pages) to force eviction
+	smallCacheSize := int64(2)
+	
+	// Clone and mount with limited cache size
+	hid, mnt, cancel := cloneMountWithCacheSize(t, smallCacheSize)
+	defer cancel()
+
+	// First, checkout branch2 to access both test files
+	if _, err := run(mnt, "git", "checkout", "-f", "branch2"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify we can access both remote files
+	_ = verifyRemoteFile(t, hid, mnt, "emptylarge.bin")
+	_ = verifyRemoteFile(t, hid, mnt, "emptylarge2.bin")
+
+	// Count pages in the shared directory
+	countSharedPages := func() map[string]int {
+		fuseDir := filepath.Join(hid, ".git", "fuse")
+		pagesByOid := make(map[string]int)
+		
+		entries, err := os.ReadDir(fuseDir)
+		if err != nil {
+			t.Logf("Error reading fuse dir: %v", err)
+			return pagesByOid
+		}
+		
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			
+			oid := entry.Name()
+			sharedDir := filepath.Join(fuseDir, oid, "shared")
+			sharedEntries, err := os.ReadDir(sharedDir)
+			if err != nil {
+				continue
+			}
+			
+			pageCount := 0
+			for _, sharedEntry := range sharedEntries {
+				if !sharedEntry.IsDir() && sharedEntry.Name() != "tc" {
+					pageCount++
+				}
+			}
+			
+			if pageCount > 0 {
+				pagesByOid[oid] = pageCount
+			}
+		}
+		return pagesByOid
+	}
+	
+	// Get initial page count
+	initialPages := countSharedPages()
+	totalInitialPages := 0
+	for _, count := range initialPages {
+		totalInitialPages += count
+	}
+	t.Logf("Initial pages by OID: %v (total: %d)", initialPages, totalInitialPages)
+
+	// Now force page usage by reading both files multiple times
+	// This ensures we exceed the cache limit and trigger eviction
+	for i := range 10 {
+		// Read from emptylarge.bin (1 page file)
+		file1, err := os.Open(filepath.Join(mnt, "emptylarge.bin"))
+		if err != nil {
+			t.Fatalf("Failed to open emptylarge.bin: %v", err)
+		}
+		buffer := make([]byte, 8192) // Small buffer to force multiple reads
+		for {
+			_, err := file1.Read(buffer)
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				t.Fatalf("Error reading emptylarge.bin: %v", err)
+			}
+		}
+		file1.Close()
+		
+		// Read from emptylarge2.bin (5 page file)
+		file2, err := os.Open(filepath.Join(mnt, "emptylarge2.bin"))
+		if err != nil {
+			t.Fatalf("Failed to open emptylarge2.bin: %v", err)
+		}
+		for {
+			_, err := file2.Read(buffer)
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				t.Fatalf("Error reading emptylarge2.bin: %v", err)
+			}
+		}
+		file2.Close()
+		
+		// Check current page count
+		currentPages := countSharedPages()
+		totalCurrentPages := 0
+		for _, count := range currentPages {
+			totalCurrentPages += count
+		}
+		t.Logf("After iteration %d, pages by OID: %v (total: %d)", i+1, currentPages, totalCurrentPages)
+		
+		// Verify the cache size is being respected
+		// We allow some flexibility here since there might be in-flight operations
+		if totalCurrentPages > int(smallCacheSize)*2 {
+			t.Errorf("Cache size exceeds the expected limit: got %d pages, expected no more than %d",
+				totalCurrentPages, smallCacheSize*2)
+		}
+	}
+
+	// Final verification - ensure both files can still be accessed
+	// even though the cache size was limited
+	emptylargePath := filepath.Join(mnt, "emptylarge.bin")
+	emptylarge2Path := filepath.Join(mnt, "emptylarge2.bin")
+	
+	// Read part of emptylarge.bin
+	file1, err := os.Open(emptylargePath)
+	if err != nil {
+		t.Fatalf("Failed to access emptylarge.bin after multiple reads: %v", err)
+	}
+	buf1 := make([]byte, 1024)
+	n1, err := file1.Read(buf1)
+	if err != nil && err != io.EOF {
+		t.Fatalf("Failed to read from emptylarge.bin: %v", err)
+	}
+	file1.Close()
+	t.Logf("Successfully read %d bytes from emptylarge.bin after multiple reads", n1)
+	
+	// Read part of emptylarge2.bin
+	file2, err := os.Open(emptylarge2Path)
+	if err != nil {
+		t.Fatalf("Failed to access emptylarge2.bin after multiple reads: %v", err)
+	}
+	buf2 := make([]byte, 1024)
+	n2, err := file2.Read(buf2)
+	if err != nil && err != io.EOF {
+		t.Fatalf("Failed to read from emptylarge2.bin: %v", err)
+	}
+	file2.Close()
+	t.Logf("Successfully read %d bytes from emptylarge2.bin after multiple reads", n2)
+	
+	// Final page count
+	finalPages := countSharedPages()
+	totalFinalPages := 0
+	for _, count := range finalPages {
+		totalFinalPages += count
+	}
+	t.Logf("Final pages by OID: %v (total: %d)", finalPages, totalFinalPages)
+	
+	// Verify that despite extensive reading, the cache remained limited
+	if totalFinalPages > int(smallCacheSize)*2 {
+		t.Errorf("Final cache size exceeds the expected limit: got %d pages, expected no more than %d",
+			totalFinalPages, smallCacheSize*2)
+	}
+	
+	t.Logf("Successfully verified limited cache functionality")
 }
