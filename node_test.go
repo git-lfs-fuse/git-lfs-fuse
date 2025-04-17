@@ -599,92 +599,61 @@ func TestRemoteFileWrite(t *testing.T) {
 func TestLimitedCacheSize(t *testing.T) {
 	// Set a very small cache size (2 pages) to force eviction
 	smallCacheSize := int64(2)
-	
+
 	// Clone and mount with limited cache size
 	hid, mnt, cancel := cloneMountWithCacheSize(t, smallCacheSize)
 	defer cancel()
 
-	// First, checkout branch2 to access both test files
+	// First, check out branch2 to access both test files
 	if _, err := run(mnt, "git", "checkout", "-f", "branch2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(mnt, "git", "pull"); err != nil {
 		t.Fatal(err)
 	}
 
 	// Count pages in the shared directory
-	countSharedPages := func() map[string]int {
+	countSharedPages := func() (int64, error) {
 		fuseDir := filepath.Join(hid, ".git", "fuse")
-		pagesByOid := make(map[string]int)
-		
+		count := int64(0)
+
 		entries, err := os.ReadDir(fuseDir)
 		if err != nil {
-			t.Logf("Error reading fuse dir: %v", err)
-			return pagesByOid
+			return 0, err
 		}
-		
+
 		for _, entry := range entries {
 			if !entry.IsDir() {
 				continue
 			}
-			
+
 			oid := entry.Name()
 			sharedDir := filepath.Join(fuseDir, oid, "shared")
 			sharedEntries, err := os.ReadDir(sharedDir)
 			if err != nil {
 				continue
 			}
-			
-			pageCount := 0
+
 			for _, sharedEntry := range sharedEntries {
 				if !sharedEntry.IsDir() && sharedEntry.Name() != "tc" {
-					pageCount++
+					count++
 				}
 			}
-			
-			if pageCount > 0 {
-				pagesByOid[oid] = pageCount
-			}
 		}
-		return pagesByOid
+		return count, nil
 	}
-	
-	// Get initial page count before accessing any files
-	initialPages := countSharedPages()
-	totalInitialPages := 0
-	for _, count := range initialPages {
-		totalInitialPages += count
-	}
-	t.Logf("Initial pages by OID: %v (total: %d)", initialPages, totalInitialPages)
 
-	// Verify we can access the first remote file
-	_ = verifyRemoteFile(t, hid, mnt, "emptylarge.bin")
-	
-	// Count pages after accessing first file
-	midPages := countSharedPages()
-	totalMidPages := 0
-	for _, count := range midPages {
-		totalMidPages += count
+	// Get the initial page count before accessing any files
+	if count, err := countSharedPages(); err != nil || count != 0 {
+		t.Fatal("failed to count shared pages")
 	}
-	t.Logf("Pages after accessing first file: %v (total: %d)", midPages, totalMidPages)
-	
-	// Verify we can access the second remote file
-	_ = verifyRemoteFile(t, hid, mnt, "emptylarge2.bin")
-	
-	// Final page count after accessing both files
-	finalPages := countSharedPages()
-	totalFinalPages := 0
-	for _, count := range finalPages {
-		totalFinalPages += count
-	}
-	t.Logf("Final pages after accessing both files: %v (total: %d)", finalPages, totalFinalPages)
-	
-	// Verify that the cache size is limited to smallCacheSize
-	if totalFinalPages > int(smallCacheSize) {
-		t.Errorf("Cache size exceeds the expected limit: got %d pages, expected no more than %d",
-			totalFinalPages, smallCacheSize)
-	}
-	
-	// Access the files again to ensure they're still accessible even with limited cache
+
 	_ = verifyRemoteFile(t, hid, mnt, "emptylarge.bin")
 	_ = verifyRemoteFile(t, hid, mnt, "emptylarge2.bin")
-	
-	t.Logf("Successfully verified limited cache functionality")
+	_ = verifyRemoteFile(t, hid, mnt, "emptylarge2.bin")
+	_ = verifyRemoteFile(t, hid, mnt, "emptylarge.bin")
+
+	if count, err := countSharedPages(); err != nil || count != smallCacheSize {
+		t.Fatal("failed to count shared pages")
+	}
 }
