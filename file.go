@@ -17,16 +17,9 @@ import (
 )
 
 func generateFid(path string) (uint64, error) {
-	fi, err := os.Stat(path)
-	if err != nil {
-		return 0, err
-	}
-
-	stat, ok := fi.Sys().(*syscall.Stat_t)
-	if !ok {
-		return 0, errors.New("failed to get inode from fi")
-	}
-	return stat.Ino, nil
+	var stat syscall.Stat_t
+	err := syscall.Stat(path, &stat)
+	return stat.Ino, err
 }
 
 func NewRemoteFile(ptr *lfs.Pointer, pl *plock, pf PageFetcher, pr string, ino uint64, fd int) *RemoteFile {
@@ -106,31 +99,24 @@ func replaceLinkFile(path string) (*os.File, error) {
 	} else if err == nil && info.Mode()&os.ModeSymlink == 0 {
 		// if the file exists and is not a symlink, no replacement is needed.
 		return os.OpenFile(path, os.O_RDWR, 0666)
-	} else if err != nil {
-		return nil, err
 	}
 
 	dest, err := os.Open(path) // open the dest file by following the link.
-	if errors.Is(err, os.ErrNotExist) {
-		_ = os.Remove(path) // remove the path which is a broken link.
-		return createFile(path)
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	defer dest.Close()
-
-	_ = os.Remove(path) // remove the link.
+	if dest != nil {
+		defer dest.Close()
+	}
+	_ = os.Remove(path)
 	file, err := createFile(path)
-	if err != nil {
-		return nil, err
+	if err == nil && dest != nil {
+		if _, err = io.Copy(file, dest); err != nil {
+			_ = file.Close()
+			_ = os.Remove(path)
+		}
 	}
-	if _, err := io.Copy(file, dest); err != nil {
-		_ = file.Close()
-		_ = os.Remove(path)
-		return nil, err
-	}
-	return file, nil
+	return file, err
 }
 
 func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, int64, error) {
@@ -155,19 +141,17 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, i
 			if err != nil {
 				return nil, 0, 0, err
 			}
-			if err = f.pf.Fetch(ctx, dest, f.ptr, pageOff, min(pageEnd, f.sz), pageStr); err != nil {
+			if err = f.pf.Fetch(ctx, dest, f.ptr, pageOff, min(pageEnd, f.sz), pageStr); err == nil {
+				// make sure every page has the same size.
+				err = dest.Truncate(pagesize)
+			}
+			if err != nil {
 				// TODO: handle ptr not found error
 				_ = dest.Close()
 				_ = os.Remove(destPth)
 				if errors.Is(err, context.Canceled) { // will this cause a retry loop?
 					return nil, 0, 0, syscall.EINTR
 				}
-				return nil, 0, 0, err
-			}
-			// make sure every page has the same size.
-			if err = dest.Truncate(pagesize); err != nil {
-				_ = dest.Close()
-				_ = os.Remove(destPth)
 				return nil, 0, 0, err
 			}
 			_ = dest.Close()
@@ -179,74 +163,64 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, i
 		}
 		if pageEnd <= f.tc {
 			page, err = os.OpenFile(pagePth, os.O_RDWR, 0666)
-			if err != nil {
-				return nil, 0, 0, err
-			}
 		} else {
 			page, err = replaceLinkFile(pagePth)
-			if err != nil {
-				return nil, 0, 0, err
-			}
-			err = page.Truncate(max(f.tc-pageOff, 0))
-			err = page.Truncate(pagesize)
-			if err != nil {
-				_ = page.Close()
-				_ = os.Remove(pagePth)
-				return nil, 0, 0, err
+			if err == nil {
+				err = page.Truncate(max(f.tc-pageOff, 0))
+				err = page.Truncate(pagesize)
+				if err != nil {
+					_ = page.Close()
+					_ = os.Remove(pagePth)
+				}
 			}
 		}
 	}
-	return page, pageOff, pageEnd - pageOff, nil
+	return page, pageOff, pageEnd - pageOff, err
 }
 
 func (f *RemoteFile) getPageForWrite(ctx context.Context, off int64) (*os.File, int64, int64, error) {
 	page, pageOff, size, err := f.getPage(ctx, off)
-	if err != nil {
-		return nil, 0, 0, err
-	}
-	_ = page.Close()
-
-	pageNum := off / pagesize
-	pageStr := strconv.Itoa(int(pageNum))
-	pagePth := filepath.Join(f.pr, pageStr)
-	page, err = replaceLinkFile(pagePth)
-	if err != nil {
-		return nil, 0, 0, err
-	}
-	err = page.Truncate(pagesize)
-	if err != nil {
+	if err == nil {
 		_ = page.Close()
-		_ = os.Remove(pagePth)
-		return nil, 0, 0, err
+		pageNum := off / pagesize
+		pageStr := strconv.Itoa(int(pageNum))
+		pagePth := filepath.Join(f.pr, pageStr)
+		page, err = replaceLinkFile(pagePth)
+		if err == nil {
+			err = page.Truncate(pagesize)
+			if err != nil {
+				_ = page.Close()
+				_ = os.Remove(pagePth)
+			}
+		}
 	}
-	return page, pageOff, size, nil
+	return page, pageOff, size, err
 }
 
 func (f *RemoteFile) Read(ctx context.Context, buf []byte, off int64) (res fuse.ReadResult, errno syscall.Errno) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
-	var readn int
+	var readn, n int
 	var bufbk = buf
 next:
 	page, pageOff, size, err := f.getPage(ctx, off)
-	if err != nil {
-		return fuse.ReadResultData(bufbk[:readn]), fs.ToErrno(err)
-	}
-	shiftOff := off - pageOff
-	n, err := page.ReadAt(buf[:min(int64(len(buf)), size-shiftOff)], shiftOff)
-	readn += n
-	if readn == len(bufbk) || off+int64(n) >= f.ptr.Size {
+	if err == nil {
+		shiftOff := off - pageOff
+		n, err = page.ReadAt(buf[:min(int64(len(buf)), size-shiftOff)], shiftOff)
+		readn += n
+		if readn == len(bufbk) || off+int64(n) >= f.ptr.Size {
+			goto ret
+		}
+		if err == nil && n > 0 {
+			buf = buf[n:]
+			off += int64(n)
+			_ = page.Close()
+			goto next
+		}
+	ret:
 		_ = page.Close()
-		return fuse.ReadResultData(bufbk[:readn]), fs.OK
 	}
-	if err == nil && n > 0 {
-		buf = buf[n:]
-		off += int64(n)
-		_ = page.Close()
-		goto next
-	}
-	_ = page.Close()
 	return fuse.ReadResultData(bufbk[:readn]), fs.ToErrno(err)
 }
 
@@ -284,6 +258,8 @@ func (f *RemoteFile) Release(ctx context.Context) syscall.Errno {
 }
 
 func (f *RemoteFile) Flush(ctx context.Context) syscall.Errno {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	var attr fuse.AttrOut
 	// TODO: can we cache the attr?
 	err := f.LoopbackFile.Getattr(ctx, &attr)
@@ -338,9 +314,7 @@ func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 
 	szPath := filepath.Join(f.ps, "tc")
 	if _, err := os.Stat(szPath); errors.Is(err, os.ErrNotExist) {
-		if err := os.MkdirAll(f.ps, 0755); err != nil {
-			return fs.ToErrno(err)
-		}
+		_ = os.MkdirAll(f.ps, 0755)
 		if err = os.WriteFile(szPath, []byte(strconv.FormatInt(f.sz, 10)), 0666); err != nil {
 			return fs.ToErrno(err)
 		}
@@ -371,12 +345,11 @@ func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 				}
 			} else if pn := ns / pagesize; pn == pageNum {
 				page, err := replaceLinkFile(path)
-				if err != nil {
-					return fs.ToErrno(err)
+				if err == nil {
+					err = page.Truncate(ns - pn*pagesize)
+					err = page.Truncate(pagesize) // keep the page in the same size.
+					_ = page.Close()
 				}
-				err = page.Truncate(ns - pn*pagesize)
-				err = page.Truncate(pagesize) // keep the page in the same size.
-				_ = page.Close()
 				if err != nil {
 					_ = os.Remove(path)
 					return fs.ToErrno(err)
@@ -394,8 +367,8 @@ func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 	bs := []byte(f.ptr.Encoded())
 	in.Size = uint64(len(bs))
 	n, err := f.LoopbackFile.Write(ctx, bs, 0)
-	if uint64(n) == in.Size {
-		return f.LoopbackFile.Setattr(ctx, in, out)
+	if uint64(n) == in.Size && err == 0 {
+		err = f.LoopbackFile.Setattr(ctx, in, out)
 	}
 	return err
 }
