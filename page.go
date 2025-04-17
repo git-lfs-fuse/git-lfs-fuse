@@ -35,6 +35,7 @@ type pageFetcher struct {
 	lru       DoubleLRU
 	actions   *otter.CacheWithVariableTTL[string, action]
 	remoteRef *git.Ref
+	pl        *plock
 	remote    string
 	pr        string
 	maxPages  int64
@@ -132,20 +133,25 @@ func (p *pageFetcher) download(ctx context.Context, w io.Writer, a action, off, 
 func (p *pageFetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, off, end int64, pageNum string) error {
 	// TODO: single flight by ptr.Oid+range and make it asyncable.
 	p.mu.Lock()
-
 	for p.lru.Size() >= p.maxPages {
-		oid, pageNum := p.lru.First()
-		path := filepath.Join(p.pr, oid, "shared", pageNum)
+		oid, pn := p.lru.First()
+		path := filepath.Join(p.pr, oid, "shared", pn)
+		if !p.pl.TryLock(path) {
+			break
+		}
 		err := os.Remove(path)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			p.pl.Unlock(path)
 			p.mu.Unlock()
 			return err
 		}
-		err = p.lru.Delete(oid, pageNum)
+		err = p.lru.Delete(oid, pn)
 		if err != nil {
+			p.pl.Unlock(path)
 			p.mu.Unlock()
 			return err
 		}
+		p.pl.Unlock(path)
 	}
 	p.mu.Unlock()
 

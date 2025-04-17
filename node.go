@@ -370,17 +370,18 @@ func NewGitLFSFuseRoot(rootPath string, cfg *config.Configuration, maxPages int6
 		return nil, err
 	}
 
+	pl := &plock{lk: make(map[string]*lock)}
+
 	pf := &pageFetcher{
 		remote:    cfg.Remote(),
 		actions:   &actions,
 		remoteRef: gref,
 		manifest:  manifest,
+		pl:        pl,
 		pr:        pr,
 		lru:       lru,
 		maxPages:  maxPages,
 	}
-
-	pl := &plock{lk: make(map[string]*lock)}
 
 	newRemoteFile := func(ptr *lfs.Pointer, ino uint64, fd int) *RemoteFile {
 		return NewRemoteFile(ptr, pl, pf, pr, ino, fd)

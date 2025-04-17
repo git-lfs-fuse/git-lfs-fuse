@@ -23,6 +23,20 @@ func (p *plock) Lock(name string) {
 	l.mu.Lock()
 }
 
+func (p *plock) TryLock(name string) (ok bool) {
+	p.mu.Lock()
+	l, ok := p.lk[name]
+	if !ok {
+		l = &lock{}
+		p.lk[name] = l
+	}
+	if ok = l.mu.TryLock(); ok {
+		l.rc++
+	}
+	p.mu.Unlock()
+	return ok
+}
+
 func (p *plock) Unlock(name string) {
 	p.mu.Lock()
 	l := p.lk[name]
