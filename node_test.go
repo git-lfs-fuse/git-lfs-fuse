@@ -240,6 +240,10 @@ func prepareRepo() (r *repository, err error) {
 }
 
 func cloneMount(t *testing.T) (hid, repo string, cancel func()) {
+	return cloneMountWithCacheSize(t, 5120)
+}
+
+func cloneMountWithCacheSize(t *testing.T, maxPage int64) (hid, repo string, cancel func()) {
 	var r *repository
 	var mnt string
 	var svc *Server
@@ -271,7 +275,7 @@ func cloneMount(t *testing.T) (hid, repo string, cancel func()) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hid, repo, svc, err = CloneMount(r.repo, filepath.Join(mnt, "repo"), false, nil, 5120)
+	hid, repo, svc, err = CloneMount(r.repo, filepath.Join(mnt, "repo"), false, nil, maxPage)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -415,6 +419,8 @@ func TestMountCheckout(t *testing.T) {
 	_ = verifyRemoteFile(t, hid, mnt, "emptylarge2.bin")
 }
 
+// 4. As a user, I can write local files in the mounted local repository correctly.
+// 6. As a user, I can commit modified local files using the Git command correctly.
 func TestLocalFileWrite(t *testing.T) {
 	hid, mnt, cancel := cloneMount(t)
 	defer cancel()
@@ -497,6 +503,8 @@ func TestLocalFileWrite(t *testing.T) {
 	}
 }
 
+// 7. As a user, I can write remote files in the mounted local repository correctly.
+// 8. As a user, I can commit modified remote files using the Git command correctly.
 func TestRemoteFileWrite(t *testing.T) {
 	hid, mnt, cancel := cloneMount(t)
 	defer cancel()
@@ -585,4 +593,98 @@ func TestRemoteFileWrite(t *testing.T) {
 	if len(remoteLarge3) != 0 {
 		t.Fatalf("remote emptylarge3.bin content mismatch: expected empty file, got %q", remoteLarge3)
 	}
+}
+
+// 10. As a user, I can access remote Git-LFS tracked files without storing them entirely locally by specifying the cache size.
+func TestLimitedCacheSize(t *testing.T) {
+	// Set a very small cache size (2 pages) to force eviction
+	smallCacheSize := int64(2)
+	
+	// Clone and mount with limited cache size
+	hid, mnt, cancel := cloneMountWithCacheSize(t, smallCacheSize)
+	defer cancel()
+
+	// First, checkout branch2 to access both test files
+	if _, err := run(mnt, "git", "checkout", "-f", "branch2"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Count pages in the shared directory
+	countSharedPages := func() map[string]int {
+		fuseDir := filepath.Join(hid, ".git", "fuse")
+		pagesByOid := make(map[string]int)
+		
+		entries, err := os.ReadDir(fuseDir)
+		if err != nil {
+			t.Logf("Error reading fuse dir: %v", err)
+			return pagesByOid
+		}
+		
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			
+			oid := entry.Name()
+			sharedDir := filepath.Join(fuseDir, oid, "shared")
+			sharedEntries, err := os.ReadDir(sharedDir)
+			if err != nil {
+				continue
+			}
+			
+			pageCount := 0
+			for _, sharedEntry := range sharedEntries {
+				if !sharedEntry.IsDir() && sharedEntry.Name() != "tc" {
+					pageCount++
+				}
+			}
+			
+			if pageCount > 0 {
+				pagesByOid[oid] = pageCount
+			}
+		}
+		return pagesByOid
+	}
+	
+	// Get initial page count before accessing any files
+	initialPages := countSharedPages()
+	totalInitialPages := 0
+	for _, count := range initialPages {
+		totalInitialPages += count
+	}
+	t.Logf("Initial pages by OID: %v (total: %d)", initialPages, totalInitialPages)
+
+	// Verify we can access the first remote file
+	_ = verifyRemoteFile(t, hid, mnt, "emptylarge.bin")
+	
+	// Count pages after accessing first file
+	midPages := countSharedPages()
+	totalMidPages := 0
+	for _, count := range midPages {
+		totalMidPages += count
+	}
+	t.Logf("Pages after accessing first file: %v (total: %d)", midPages, totalMidPages)
+	
+	// Verify we can access the second remote file
+	_ = verifyRemoteFile(t, hid, mnt, "emptylarge2.bin")
+	
+	// Final page count after accessing both files
+	finalPages := countSharedPages()
+	totalFinalPages := 0
+	for _, count := range finalPages {
+		totalFinalPages += count
+	}
+	t.Logf("Final pages after accessing both files: %v (total: %d)", finalPages, totalFinalPages)
+	
+	// Verify that the cache size is limited to smallCacheSize
+	if totalFinalPages > int(smallCacheSize) {
+		t.Errorf("Cache size exceeds the expected limit: got %d pages, expected no more than %d",
+			totalFinalPages, smallCacheSize)
+	}
+	
+	// Access the files again to ensure they're still accessible even with limited cache
+	_ = verifyRemoteFile(t, hid, mnt, "emptylarge.bin")
+	_ = verifyRemoteFile(t, hid, mnt, "emptylarge2.bin")
+	
+	t.Logf("Successfully verified limited cache functionality")
 }
