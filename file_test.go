@@ -327,3 +327,43 @@ func TestRemoteFile_TruncateClose(t *testing.T) {
 		t.Fatalf("incorrect tc on disk: %v %v", tc, err)
 	}
 }
+
+type errFetcher struct {
+	err error
+}
+
+func (f *errFetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, off, end int64, pageNum string) error {
+	return f.err
+}
+
+func TestRemoteFile_Read_FetchError(t *testing.T) {
+	f, cancel := createRandomRemoteFile(pagesize)
+	defer cancel()
+	f.pf = &errFetcher{err: context.Canceled}
+
+	if _, err := f.Read(context.Background(), nil, int64(0)); !errors.Is(err, syscall.EINTR) {
+		t.Fatalf("Read error: %v", err)
+	}
+
+	if _, err := f.Write(context.Background(), nil, int64(0)); !errors.Is(err, syscall.EINTR) {
+		t.Fatalf("Read error: %v", err)
+	}
+
+	f.pf = &errFetcher{err: context.DeadlineExceeded}
+	if _, err := f.Read(context.Background(), nil, int64(0)); !errors.Is(err, syscall.ETIMEDOUT) {
+		t.Fatalf("Read error: %v", err)
+	}
+
+	if _, err := f.Write(context.Background(), nil, int64(0)); !errors.Is(err, syscall.ETIMEDOUT) {
+		t.Fatalf("Read error: %v", err)
+	}
+
+	f.pf = &errFetcher{err: errors.New("other error")}
+	if _, err := f.Read(context.Background(), nil, int64(0)); !errors.Is(err, syscall.EBADF) {
+		t.Fatalf("Read error: %v", err)
+	}
+
+	if _, err := f.Write(context.Background(), nil, int64(0)); !errors.Is(err, syscall.EBADF) {
+		t.Fatalf("Read error: %v", err)
+	}
+}

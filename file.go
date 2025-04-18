@@ -146,13 +146,15 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, i
 				err = dest.Truncate(pagesize)
 			}
 			if err != nil {
-				// TODO: handle ptr not found error
 				_ = dest.Close()
 				_ = os.Remove(destPth)
 				if errors.Is(err, context.Canceled) { // will this cause a retry loop?
 					return nil, 0, 0, syscall.EINTR
 				}
-				return nil, 0, 0, err
+				if errors.Is(err, context.DeadlineExceeded) {
+					return nil, 0, 0, syscall.ETIMEDOUT
+				}
+				return nil, 0, 0, syscall.EBADF
 			}
 			_ = dest.Close()
 			if err = createSymlink(pagePth, destPth); err != nil {
@@ -263,28 +265,27 @@ func (f *RemoteFile) Flush(ctx context.Context) syscall.Errno {
 	var attr fuse.AttrOut
 	// TODO: can we cache the attr?
 	err := f.LoopbackFile.Getattr(ctx, &attr)
-	if err != 0 {
-		return err
+	if err == 0 {
+		bs := []byte(f.ptr.Encoded())
+		_, err = f.LoopbackFile.Write(ctx, bs, 0)
+		if err == 0 {
+			attrIn := &fuse.SetAttrIn{
+				SetAttrInCommon: fuse.SetAttrInCommon{
+					Size:      uint64(len(bs)),
+					Atime:     attr.Atime,
+					Mtime:     attr.Mtime,
+					Ctime:     attr.Ctime,
+					Atimensec: attr.Atimensec,
+					Mtimensec: attr.Mtimensec,
+					Ctimensec: attr.Ctimensec,
+					Mode:      attr.Mode,
+					Owner:     attr.Owner,
+				},
+			}
+			err = f.LoopbackFile.Setattr(ctx, attrIn, &attr)
+		}
 	}
-	bs := []byte(f.ptr.Encoded())
-	n, err := f.LoopbackFile.Write(ctx, bs, 0)
-	if int(n) != len(bs) {
-		return err
-	}
-	attrIn := &fuse.SetAttrIn{
-		SetAttrInCommon: fuse.SetAttrInCommon{
-			Size:      uint64(len(bs)),
-			Atime:     attr.Atime,
-			Mtime:     attr.Mtime,
-			Ctime:     attr.Ctime,
-			Atimensec: attr.Atimensec,
-			Mtimensec: attr.Mtimensec,
-			Ctimensec: attr.Ctimensec,
-			Mode:      attr.Mode,
-			Owner:     attr.Owner,
-		},
-	}
-	return f.LoopbackFile.Setattr(ctx, attrIn, &attr)
+	return err
 }
 
 func (f *RemoteFile) Fsync(ctx context.Context, flags uint32) (errno syscall.Errno) {

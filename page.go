@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -53,16 +54,13 @@ func (p *pageFetcher) getAction(ctx context.Context, ptr *lfs.Pointer) (action, 
 		return action{}, err
 	}
 	if len(br.Objects) == 0 {
-		return action{}, errors.New("no objects found")
+		return action{}, &tq.ObjectError{Code: http.StatusNotFound, Message: "Object does not exist"}
 	}
 	transfer := *br.Objects[0]
 	if transfer.Error != nil {
 		return action{}, transfer.Error
 	}
 	rel := transfer.Actions["download"]
-	if rel == nil {
-		rel = transfer.Links["download"]
-	}
 	if rel == nil {
 		return action{}, errors.New("no download action found")
 	}
@@ -159,14 +157,13 @@ func (p *pageFetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, 
 	if err != nil {
 		return err
 	}
+	var r *retryErr
 	for nextOff := off; nextOff < end && err == nil; {
 		nextOff, err = p.download(ctx, w, a, nextOff, end)
-		log.Printf("fetch: oid=(%s) size=(%s) %6.2f%% err=%v", ptr.Oid, humanReadableSize(ptr.Size), float64(nextOff)*100/float64(ptr.Size), err)
-		if err != nil {
-			if r, ok := err.(*retryErr); ok {
-				err = nil
-				time.Sleep(r.after)
-			}
+		log.Printf("fetch: oid=(%s) %s/%d err=%v", ptr.Oid, pageNum, int64(math.Ceil(float64(ptr.Size/pagesize))), err)
+		if errors.As(err, &r) {
+			err = nil
+			time.Sleep(r.after)
 		}
 	}
 	if err != nil {
@@ -186,16 +183,3 @@ type retryErr struct {
 }
 
 func (e *retryErr) Error() string { return "retry after " + e.after.String() }
-
-func humanReadableSize(bytes int64) string {
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%d B", bytes)
-	}
-	div, exp := int64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
-}
