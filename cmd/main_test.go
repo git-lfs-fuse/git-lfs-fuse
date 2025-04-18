@@ -112,7 +112,7 @@ func TestMainMount(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		os.Args = []string{"main", "mount", repo.repo, mnt}
+		os.Args = []string{"main", "mount", repo.repo, mnt, "--origin", "origin", "--branch", "main", "--depth", "1", "--max-pages", "0", "--no-tags"}
 		main()
 		close(done)
 	}()
