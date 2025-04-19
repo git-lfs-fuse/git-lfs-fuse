@@ -5,9 +5,10 @@ go 1.23.4
 replace github.com/hanwen/go-fuse/v2 v2.7.3-0.20250116065539-aa9c5164721d => github.com/git-lfs-fuse/go-fuse/v2 v2.7.4-dev8
 
 require (
-	github.com/git-lfs-fuse/lfs-test-server v0.5.0-dev4
+	github.com/git-lfs-fuse/lfs-test-server v0.5.0-dev5
 	github.com/git-lfs/git-lfs/v3 v3.6.1-0.20250114181820-a8bf08074988
 	github.com/go-git/go-git/v5 v5.15.0
+	github.com/gorilla/mux v1.8.1
 	github.com/hanwen/go-fuse/v2 v2.7.3-0.20250116065539-aa9c5164721d
 	github.com/maypok86/otter v1.2.4
 	github.com/spf13/cobra v1.9.1
@@ -26,7 +27,6 @@ require (
 	github.com/git-lfs/pktline v0.0.0-20230103162542-ca444d533ef1 // indirect
 	github.com/git-lfs/wildmatch/v2 v2.0.1 // indirect
 	github.com/gorilla/context v1.1.2 // indirect
-	github.com/gorilla/mux v1.8.1 // indirect
 	github.com/hashicorp/go-uuid v1.0.3 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jcmturner/aescts/v2 v2.0.0 // indirect

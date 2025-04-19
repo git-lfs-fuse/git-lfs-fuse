@@ -95,14 +95,13 @@ func (p *pageFetcher) download(ctx context.Context, w io.Writer, a action, off, 
 	} else {
 		resp, err = p.manifest.APIClient().DoAPIRequestWithAuth(p.remote, req)
 	}
-	if err != nil {
-		return off, err
+	if resp != nil && resp.Body != nil {
+		defer func() {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+		}()
 	}
-	defer func() {
-		_, _ = io.Copy(io.Discard, resp.Body)
-		_ = resp.Body.Close()
-	}()
-	if resp.StatusCode == http.StatusTooManyRequests {
+	if resp != nil && resp.StatusCode == http.StatusTooManyRequests {
 		retryAfter := resp.Header.Get("Retry-After")
 		if seconds, err := strconv.Atoi(retryAfter); err == nil {
 			return off, &retryErr{after: time.Duration(seconds) * time.Second}
@@ -112,8 +111,11 @@ func (p *pageFetcher) download(ctx context.Context, w io.Writer, a action, off, 
 		}
 		return off, &retryErr{after: time.Second} // TODO: backoff + random jitter
 	}
-	if resp.StatusCode != http.StatusPartialContent {
+	if resp != nil && resp.StatusCode != http.StatusPartialContent {
 		return off, errors.New("unexpected status code: " + resp.Status)
+	}
+	if err != nil {
+		return off, err
 	}
 	rangeHdr := resp.Header.Get("Content-Range")
 	regex := regexp.MustCompile(`bytes (\d+)\-.*`)
@@ -160,7 +162,7 @@ func (p *pageFetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, 
 	var r *retryErr
 	for nextOff := off; nextOff < end && err == nil; {
 		nextOff, err = p.download(ctx, w, a, nextOff, end)
-		log.Printf("fetch: oid=(%s) %s/%d err=%v", ptr.Oid, pageNum, int64(math.Ceil(float64(ptr.Size/pagesize))), err)
+		log.Printf("fetch: oid=(%s) %dMB %s/%d err=%v", ptr.Oid, pagesize/(1024*1024), pageNum, int64(math.Ceil(float64(ptr.Size/pagesize)))-1, err)
 		if errors.As(err, &r) {
 			err = nil
 			time.Sleep(r.after)
@@ -182,4 +184,4 @@ type retryErr struct {
 	after time.Duration
 }
 
-func (e *retryErr) Error() string { return "retry after " + e.after.String() }
+func (e *retryErr) Error() string { return "HTTP 429: retry after " + e.after.String() }

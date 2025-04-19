@@ -14,10 +14,12 @@ import (
 	lts "github.com/git-lfs-fuse/lfs-test-server"
 	"github.com/git-lfs/git-lfs/v3/config"
 	"github.com/git-lfs/git-lfs/v3/lfs"
+	"github.com/gorilla/mux"
 )
 
 type repository struct {
 	ln   net.Listener
+	app  *lts.App
 	dir  string
 	repo string
 }
@@ -41,10 +43,10 @@ func run(dir, name string, args ...string) (string, error) {
 	return string(bs), err
 }
 
-func startLFS(dir string) (net.Listener, error) {
+func startLFS(dir string) (net.Listener, *lts.App, error) {
 	tl, err := lts.NewTrackingListener("tcp://:0")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	_, port, _ := net.SplitHostPort(tl.Addr().String())
@@ -56,19 +58,19 @@ func startLFS(dir string) (net.Listener, error) {
 
 	metaStore, err := lts.NewMetaStore(cfg, filepath.Join(dir, "lfs.db"))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	contentStore, err := lts.NewContentStore(filepath.Join(dir, "content.db"))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	app := lts.NewApp(cfg, contentStore, metaStore)
 	go func() {
 		_ = app.Serve(tl)
 	}()
-	return tl, nil
+	return tl, app, nil
 }
 
 func prepareRepo() (r *repository, err error) {
@@ -121,7 +123,7 @@ func prepareRepo() (r *repository, err error) {
 	if err != nil {
 		return
 	}
-	r.ln, err = startLFS(r.dir)
+	r.ln, r.app, err = startLFS(r.dir)
 	if err != nil {
 		return
 	}
@@ -240,10 +242,10 @@ func prepareRepo() (r *repository, err error) {
 }
 
 func cloneMount(t *testing.T) (hid, repo string, cancel func()) {
-	return cloneMountWithCacheSize(t, 5120)
+	return cloneMountWithCacheSize(t, 5120, nil)
 }
 
-func cloneMountWithCacheSize(t *testing.T, maxPage int64) (hid, repo string, cancel func()) {
+func cloneMountWithCacheSize(t *testing.T, maxPage int64, middleware mux.MiddlewareFunc) (hid, repo string, cancel func()) {
 	var r *repository
 	var mnt string
 	var svc *Server
@@ -271,6 +273,8 @@ func cloneMountWithCacheSize(t *testing.T, maxPage int64) (hid, repo string, can
 	if err != nil {
 		t.Fatal(err)
 	}
+	r.app.Middleware = middleware
+
 	mnt, err = os.MkdirTemp("", "glf-mnt")
 	if err != nil {
 		t.Fatal(err)
@@ -601,7 +605,7 @@ func TestLimitedCacheSize(t *testing.T) {
 	smallCacheSize := int64(2)
 
 	// Clone and mount with limited cache size
-	hid, mnt, cancel := cloneMountWithCacheSize(t, smallCacheSize)
+	hid, mnt, cancel := cloneMountWithCacheSize(t, smallCacheSize, nil)
 	defer cancel()
 
 	// First, check out branch2 to access both test files
