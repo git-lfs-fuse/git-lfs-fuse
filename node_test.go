@@ -1,6 +1,7 @@
 package gitlfsfuse
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"log"
@@ -15,6 +16,7 @@ import (
 	"github.com/git-lfs/git-lfs/v3/config"
 	"github.com/git-lfs/git-lfs/v3/lfs"
 	"github.com/gorilla/mux"
+	"github.com/hanwen/go-fuse/v2/fuse"
 )
 
 type repository struct {
@@ -423,8 +425,6 @@ func TestMountCheckout(t *testing.T) {
 	_ = verifyRemoteFile(t, hid, mnt, "emptylarge2.bin")
 }
 
-// 4. As a user, I can write local files in the mounted local repository correctly.
-// 6. As a user, I can commit modified local files using the Git command correctly.
 func TestLocalFileWrite(t *testing.T) {
 	hid, mnt, cancel := cloneMount(t)
 	defer cancel()
@@ -507,8 +507,6 @@ func TestLocalFileWrite(t *testing.T) {
 	}
 }
 
-// 7. As a user, I can write remote files in the mounted local repository correctly.
-// 8. As a user, I can commit modified remote files using the Git command correctly.
 func TestRemoteFileWrite(t *testing.T) {
 	hid, mnt, cancel := cloneMount(t)
 	defer cancel()
@@ -660,4 +658,70 @@ func TestLimitedCacheSize(t *testing.T) {
 	if count, err := countSharedPages(); err != nil || count != smallCacheSize {
 		t.Fatal("failed to count shared pages")
 	}
+}
+
+func TestFSNodeOperations(t *testing.T) {
+	rootDir, err := os.MkdirTemp("", "fsnode_operations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(rootDir)
+
+	// Create a minimal configuration.
+	cfg := config.NewIn(rootDir, "")
+	node, err := NewGitLFSFuseRoot(rootDir, cfg, 1024)
+	if err != nil {
+		t.Fatalf("NewGitLFSFuseRoot error: %v", err)
+	}
+	fsnode := node.(*FSNode)
+
+	// Test Statfs
+	t.Run("Statfs", func(t *testing.T) {
+		var out fuse.StatfsOut
+		errno := fsnode.Statfs(context.Background(), &out)
+		if errno != 0 {
+			t.Fatalf("FSNode.Statfs returned error: %v", errno)
+		}
+	})
+
+	// Test Mknod
+	// t.Run("Mknod", func(t *testing.T) {
+	// 	testFile := "test_mknod.txt"
+	// 	var out fuse.EntryOut
+	// 	_, errno := fsnode.Mknod(context.Background(), testFile, 0644, 0, &out)
+	// 	if errno != 0 && errno != syscall.ENOSYS {
+	// 		t.Fatalf("FSNode.Mknod returned unexpected error: %v", errno)
+	// 	}
+
+	// 	targetPath := filepath.Join(fsnode.RootData.Path, fsnode.Path(fsnode.root()), testFile)
+	// 	_, err = os.Stat(targetPath)
+	// 	if err != nil && !os.IsNotExist(err) {
+	// 		t.Fatalf("Error stating file: %v", err)
+	// 	}
+	// 	if errno == 0 {
+	// 		if os.IsNotExist(err) {
+	// 			t.Fatalf("File %q was not created", targetPath)
+	// 		}
+	// 		_ = os.Remove(targetPath)
+	// 	}
+	// })
+
+	// Test Rmdir
+	t.Run("Rmdir", func(t *testing.T) {
+		subdir := "testdir"
+		fullSubdirPath := filepath.Join(fsnode.RootData.Path, fsnode.Path(fsnode.root()), subdir)
+		if err := os.Mkdir(fullSubdirPath, 0755); err != nil {
+			t.Fatalf("Failed to create subdirectory: %v", err)
+		}
+
+		errno := fsnode.Rmdir(context.Background(), subdir)
+		if errno != 0 {
+			t.Fatalf("FSNode.Rmdir returned error: %v", errno)
+		}
+
+		_, err = os.Stat(fullSubdirPath)
+		if err == nil || !os.IsNotExist(err) {
+			t.Fatalf("Subdirectory %q still exists after Rmdir", fullSubdirPath)
+		}
+	})
 }
