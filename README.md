@@ -4,7 +4,7 @@ Mount remote repositories and datasets managed by Git LFS locally.
 
 ## Features
 
-- **Faster Clone and Checkout**: Git LFS tracked files are downloaded by pages (2MiB per page) when accessed on-demand.
+- **Faster Clone and Checkout**: Git LFS tracked files are downloaded by pages (2MiB per page) on-demand.
 - **Work with Limited Storage**: Pages are cached on local disk limited by the `max-pages` config (default: 5120).
 
 ## Getting Started
@@ -16,13 +16,13 @@ git-lfs-fuse mount https://huggingface.co/datasets/nvidia/OpenCodeReasoning
 
 ## Requirements
 
-- FUSE support on your operating system. (Linux, Windows WSL 2, macOS with macFUSE)
+- FUSE support on your operating system (Linux, Windows WSL 2, macOS with macFUSE).
 - Git LFS installed and configured.
 
 ## Roadmap
 
-* NFS v3 or v4
-* Git submodule
+* NFS v3 or v4.
+* Git submodule.
 
 ## Contributing
 
