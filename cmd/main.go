@@ -21,8 +21,8 @@ func main() {
 	}
 	var mountCmd = &cobra.Command{
 		Run:   mountRun,
-		Use:   "mount [<options>] [--] <repo> [<dir>]",
-		Short: "Mount the provided repository to the local directory",
+		Use:   "mount <repo> [<dir>]",
+		Short: "Mount the provided remote repository locally",
 	}
 	mountCmd.Flags().Bool("progress", false, "force progress reporting")
 	mountCmd.Flags().BoolP("no-checkout", "n", false, "don't clone shallow repository")
@@ -38,7 +38,7 @@ func main() {
 	mountCmd.Flags().Bool("no-tags", false, "don't clone any tags, and make later fetches not to follow them")
 	mountCmd.Flags().Bool("shallow-submodules", false, "any cloned submodules will be shallow")
 	mountCmd.Flags().BoolVar(&directMount, "direct-mount", false, "try to call the mount syscall instead of executing fusermount")
-	mountCmd.Flags().Int("max-pages", 5120, "maximum cached pages")
+	mountCmd.Flags().Int("max-pages", 5120, "maximum cached pages. 2MiB per page.")
 	entryCmd.AddCommand(mountCmd)
 	if err := entryCmd.Execute(); err != nil {
 		log.Fatal(err)
