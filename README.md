@@ -16,7 +16,7 @@ git-lfs-fuse mount https://huggingface.co/datasets/nvidia/OpenCodeReasoning
 
 ## Requirements
 
-- FUSE support on your operating system (Linux, Windows WSL 2, macOS with macFUSE).
+- FUSE support on your operating system (Linux, Windows WSL 2, macOS with [macFUSE](https://macfuse.github.io/) installed).
 - Git LFS installed and configured.
 
 ## Roadmap
