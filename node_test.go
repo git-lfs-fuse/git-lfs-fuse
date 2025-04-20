@@ -661,13 +661,15 @@ func TestLimitedCacheSize(t *testing.T) {
 }
 
 func TestFSNodeOperations(t *testing.T) {
-	rootDir, err := os.MkdirTemp("", "fsnode_operations")
+	rootDir, err := os.MkdirTemp("", "fsnode_ops")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(rootDir)
 
-	// Create a minimal configuration.
+	if out, err := exec.Command("git", "init", "--initial-branch=main", rootDir).CombinedOutput(); err != nil {
+		t.Fatalf("git init failed: %s\n%v", out, err)
+	}
 	cfg := config.NewIn(rootDir, "")
 	node, err := NewGitLFSFuseRoot(rootDir, cfg, 1024)
 	if err != nil {
@@ -688,40 +690,101 @@ func TestFSNodeOperations(t *testing.T) {
 	// t.Run("Mknod", func(t *testing.T) {
 	// 	testFile := "test_mknod.txt"
 	// 	var out fuse.EntryOut
-	// 	_, errno := fsnode.Mknod(context.Background(), testFile, 0644, 0, &out)
-	// 	if errno != 0 && errno != syscall.ENOSYS {
-	// 		t.Fatalf("FSNode.Mknod returned unexpected error: %v", errno)
+	// 	inode, errno := fsnode.Mknod(context.Background(), testFile, 0644, 0, &out)
+	// 	if errno != 0 {
+	// 		t.Fatalf("FSNode.Mknod returned error: %v", errno)
+	// 	}
+	// 	if inode == nil {
+	// 		t.Fatalf("FSNode.Mknod returned nil inode")
 	// 	}
 
-	// 	targetPath := filepath.Join(fsnode.RootData.Path, fsnode.Path(fsnode.root()), testFile)
-	// 	_, err = os.Stat(targetPath)
-	// 	if err != nil && !os.IsNotExist(err) {
-	// 		t.Fatalf("Error stating file: %v", err)
+	// 	fi, err := os.Lstat(filepath.Join(fsnode.RootData.Path, fsnode.Path(fsnode.root()), testFile))
+	// 	if err != nil {
+	// 		t.Fatalf("Mknod Lstat failed: %v", err)
 	// 	}
-	// 	if errno == 0 {
-	// 		if os.IsNotExist(err) {
-	// 			t.Fatalf("File %q was not created", targetPath)
-	// 		}
-	// 		_ = os.Remove(targetPath)
+	// 	if fi.Mode().Type() != 0 {
+	// 		t.Fatalf("File %q is not a regular file", testFile)
 	// 	}
 	// })
 
-	// Test Rmdir
-	t.Run("Rmdir", func(t *testing.T) {
+	// Test Rmdir and Readdir
+	t.Run("Rmdir_Readdir", func(t *testing.T) {
 		subdir := "testdir"
-		fullSubdirPath := filepath.Join(fsnode.RootData.Path, fsnode.Path(fsnode.root()), subdir)
-		if err := os.Mkdir(fullSubdirPath, 0755); err != nil {
+		subdirPath := filepath.Join(fsnode.RootData.Path, fsnode.Path(fsnode.root()), subdir)
+		if err := os.Mkdir(subdirPath, 0755); err != nil {
 			t.Fatalf("Failed to create subdirectory: %v", err)
 		}
 
-		errno := fsnode.Rmdir(context.Background(), subdir)
+		_, errno := fsnode.Readdir(context.Background())
+		if errno != 0 {
+			t.Fatalf("FSNode.Readdir returned error: %v", errno)
+		}
+
+		errno = fsnode.Rmdir(context.Background(), subdir)
 		if errno != 0 {
 			t.Fatalf("FSNode.Rmdir returned error: %v", errno)
 		}
 
-		_, err = os.Stat(fullSubdirPath)
+		_, err = os.Stat(subdirPath)
 		if err == nil || !os.IsNotExist(err) {
-			t.Fatalf("Subdirectory %q still exists after Rmdir", fullSubdirPath)
+			t.Fatalf("Subdirectory %q still exists after Rmdir", subdirPath)
 		}
 	})
+
+	// Test Symlink and Readlink
+	// t.Run("Symlink_Readlink", func(t *testing.T) {
+	// 	target := "targetFile"
+	// 	if err := os.WriteFile(filepath.Join(fsnode.RootData.Path, fsnode.Path(fsnode.root()), target), []byte("test"), 0644); err != nil {
+	// 		t.Fatalf("Failed to create target file: %v", err)
+	// 	}
+
+	// 	symFile := "testSym"
+	// 	var out fuse.EntryOut
+	// 	inode, errno := fsnode.Symlink(context.Background(), target, symFile, &out)
+	// 	if errno != 0 {
+	// 		t.Fatalf("FSNode.Symlink returned error: %v", errno)
+	// 	}
+	// 	if inode == nil {
+	// 		t.Fatalf("FSNode.Symlink returned nil inode")
+	// 	}
+
+	// 	symPath := filepath.Join(fsnode.RootData.Path, fsnode.Path(fsnode.root()), symFile)
+	// 	info, err := os.Lstat(symPath)
+	// 	if err != nil {
+	// 		t.Fatalf("Symlink Lstat failed: %v", err)
+	// 	}
+	// 	if info.Mode()&os.ModeSymlink == 0 {
+	// 		t.Fatalf("File %q is not a symlink", symPath)
+	// 	}
+
+	// 	symContent, errno := fsnode.Readlink(context.Background())
+	// 	if errno != 0 {
+	// 		t.Fatalf("FSNode.Readlink returned error: %v", errno)
+	// 	}
+	// 	if string(symContent) != target {
+	// 		t.Fatalf("Readlink target mismatch: got %q, want %q", symContent, target)
+	// 	}
+	// })
+
+	// Test setxattr, removexattr, listxattr
+	t.Run("Setxattr_Removexattr_Listxattr", func(t *testing.T) {
+		attrName := "user.testattr"
+		attrValue := []byte("testvalue")
+
+		errno := fsnode.Setxattr(context.Background(), attrName, attrValue, 0)
+		if errno != 0 {
+			t.Fatalf("FSNode.Setxattr returned error: %v", errno)
+		}
+
+		_, errno = fsnode.Listxattr(context.Background(), nil)
+		if errno != 0 {
+			t.Fatalf("FSNode.Listxattr returned error: %v", errno)
+		}
+
+		errno = fsnode.Removexattr(context.Background(), attrName)
+		if errno != 0 {
+			t.Fatalf("FSNode.Removexattr returned error: %v", errno)
+		}
+	})
+
 }
