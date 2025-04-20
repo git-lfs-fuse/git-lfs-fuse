@@ -24,7 +24,7 @@ type fetcher struct {
 	f *os.File
 }
 
-func (f *fetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, off, end int64, pageNum string) error {
+func (f *fetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, off, end, size int64, pageNum string) error {
 	if _, err := f.f.Seek(off, io.SeekStart); err != nil {
 		return err
 	}
@@ -332,7 +332,7 @@ type errFetcher struct {
 	err error
 }
 
-func (f *errFetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, off, end int64, pageNum string) error {
+func (f *errFetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, off, end, size int64, pageNum string) error {
 	return f.err
 }
 

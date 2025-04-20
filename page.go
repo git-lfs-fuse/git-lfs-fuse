@@ -28,7 +28,7 @@ type action struct {
 }
 
 type PageFetcher interface {
-	Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, off, end int64, pageNum string) error
+	Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, off, end, size int64, pageNum string) error
 }
 
 type pageFetcher struct {
@@ -43,13 +43,13 @@ type pageFetcher struct {
 	mu        sync.Mutex
 }
 
-func (p *pageFetcher) getAction(ctx context.Context, ptr *lfs.Pointer) (action, error) {
-	a, ok := p.actions.Get(ptr.Oid)
+func (p *pageFetcher) getAction(ctx context.Context, oid string, size int64) (action, error) {
+	a, ok := p.actions.Get(oid)
 	if ok {
 		return a, nil
 	}
 	// TODO: single flight, aggregate concurrent getActions and respect the ctx.
-	br, err := tq.Batch(p.manifest, tq.Download, p.remote, p.remoteRef, []*tq.Transfer{{Oid: ptr.Oid, Size: ptr.Size}})
+	br, err := tq.Batch(p.manifest, tq.Download, p.remote, p.remoteRef, []*tq.Transfer{{Oid: oid, Size: size}})
 	if err != nil {
 		return action{}, err
 	}
@@ -70,11 +70,11 @@ func (p *pageFetcher) getAction(ctx context.Context, ptr *lfs.Pointer) (action, 
 		Authenticated: transfer.Authenticated,
 	}
 	if rel.ExpiresIn > 0 {
-		p.actions.Set(ptr.Oid, a, time.Duration(rel.ExpiresIn)*time.Second)
+		p.actions.Set(oid, a, time.Duration(rel.ExpiresIn)*time.Second)
 	} else if !rel.ExpiresAt.IsZero() {
-		p.actions.Set(ptr.Oid, a, rel.ExpiresAt.Sub(time.Now()))
+		p.actions.Set(oid, a, rel.ExpiresAt.Sub(time.Now()))
 	} else {
-		p.actions.Set(ptr.Oid, a, time.Minute*5)
+		p.actions.Set(oid, a, time.Minute*5)
 	}
 	return a, nil
 }
@@ -130,7 +130,7 @@ func (p *pageFetcher) download(ctx context.Context, w io.Writer, a action, off, 
 	return off + n, err
 }
 
-func (p *pageFetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, off, end int64, pageNum string) error {
+func (p *pageFetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, off, end, size int64, pageNum string) error {
 	// TODO: single flight by ptr.Oid+range and make it asyncable.
 	p.mu.Lock()
 	for p.lru.Size() >= p.maxPages {
@@ -155,14 +155,14 @@ func (p *pageFetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, 
 	}
 	p.mu.Unlock()
 
-	a, err := p.getAction(ctx, ptr)
+	a, err := p.getAction(ctx, ptr.Oid, size)
 	if err != nil {
 		return err
 	}
 	var r *retryErr
 	for nextOff := off; nextOff < end && err == nil; {
 		nextOff, err = p.download(ctx, w, a, nextOff, end)
-		log.Printf("fetch: oid=(%s) %dMB %s/%d err=%v", ptr.Oid, pagesize/(1024*1024), pageNum, int64(math.Ceil(float64(ptr.Size/pagesize)))-1, err)
+		log.Printf("fetch: oid=(%s) %dMB %s/%d err=%v", ptr.Oid, pagesize/(1024*1024), pageNum, int64(math.Ceil(float64(size/pagesize))), err)
 		if errors.As(err, &r) {
 			err = nil
 			time.Sleep(r.after)

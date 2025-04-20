@@ -141,7 +141,7 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, i
 			if err != nil {
 				return nil, 0, 0, err
 			}
-			if err = f.pf.Fetch(ctx, dest, f.ptr, pageOff, min(pageEnd, f.sz), pageStr); err == nil {
+			if err = f.pf.Fetch(ctx, dest, f.ptr, pageOff, min(pageEnd, f.sz), f.sz, pageStr); err == nil {
 				// make sure every page has the same size.
 				err = dest.Truncate(pagesize)
 			}
