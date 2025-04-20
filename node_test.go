@@ -16,6 +16,7 @@ import (
 	"github.com/git-lfs/git-lfs/v3/config"
 	"github.com/git-lfs/git-lfs/v3/lfs"
 	"github.com/gorilla/mux"
+	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 )
 
@@ -661,21 +662,28 @@ func TestLimitedCacheSize(t *testing.T) {
 }
 
 func TestFsNodeOperations(t *testing.T) {
-	rootDir, err := os.MkdirTemp("", "fsnode_ops")
+	root, err := os.MkdirTemp("", "fsnode_ops")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(rootDir)
+	defer os.RemoveAll(root)
 
-	if out, err := exec.Command("git", "init", "--initial-branch=main", rootDir).CombinedOutput(); err != nil {
+	if out, err := exec.Command("git", "init", "--initial-branch=main", root).CombinedOutput(); err != nil {
 		t.Fatalf("git init failed: %s\n%v", out, err)
 	}
-	cfg := config.NewIn(rootDir, "")
-	node, err := NewGitLFSFuseRoot(rootDir, cfg, 1024)
+	cfg := config.NewIn(root, "")
+	node, err := NewGitLFSFuseRoot(root, cfg, 5120)
 	if err != nil {
 		t.Fatalf("NewGitLFSFuseRoot error: %v", err)
 	}
 	fsnode := node.(*FSNode)
+
+	mnt, err := os.MkdirTemp("", "mnt")
+	if err != nil {
+		t.Fatalf("MkdirTemp error: %v", err)
+	}
+	srv, err := fs.Mount(mnt, fsnode, &fs.Options{NullPermissions: true})
+	defer srv.Unmount()
 
 	// Test Statfs
 	t.Run("Statfs", func(t *testing.T) {
@@ -687,22 +695,22 @@ func TestFsNodeOperations(t *testing.T) {
 	})
 
 	// Test Mknod
-	// t.Run("Mknod", func(t *testing.T) {
-	// 	testFile := "test_mknod.txt"
-	// 	var out fuse.EntryOut
-	// 	inode, errno := fsnode.Mknod(context.Background(), testFile, 0644, 0, &out)
-	// 	if errno != 0 {
-	// 		t.Fatalf("FSNode.Mknod returned error: %v", errno)
-	// 	}
-	// 	if inode == nil {
-	// 		t.Fatalf("FSNode.Mknod returned nil inode")
-	// 	}
-	// })
+	t.Run("Mknod", func(t *testing.T) {
+		testFile := "test_mknod.txt"
+		var out fuse.EntryOut
+		inode, errno := fsnode.Mknod(context.Background(), testFile, fuse.S_IFREG|0644, 0, &out)
+		if errno != 0 {
+			t.Fatalf("FSNode.Mknod returned error: %v", errno)
+		}
+		if inode == nil {
+			t.Fatalf("FSNode.Mknod returned nil inode")
+		}
+	})
 
 	// Test Rmdir and Readdir
 	t.Run("Rmdir_Readdir", func(t *testing.T) {
 		subdir := "testdir"
-		subdirPath := filepath.Join(rootDir, subdir)
+		subdirPath := filepath.Join(root, subdir)
 		if err := os.Mkdir(subdirPath, 0755); err != nil {
 			t.Fatalf("Failed to create subdirectory: %v", err)
 		}
@@ -726,13 +734,12 @@ func TestFsNodeOperations(t *testing.T) {
 	// Test Symlink and Readlink
 	// t.Run("Symlink_Readlink", func(t *testing.T) {
 	// 	target := "targetFile"
-	// 	if err := os.WriteFile(filepath.Join(rootDir, target), []byte("test"), 0644); err != nil {
+	// 	if err := os.WriteFile(filepath.Join(root, target), []byte("test"), 0644); err != nil {
 	// 		t.Fatalf("Failed to create target file: %v", err)
 	// 	}
 
-	// 	symFile := "testSym"
 	// 	var out fuse.EntryOut
-	// 	inode, errno := fsnode.Symlink(context.Background(), target, symFile, &out)
+	// 	inode, errno := fsnode.Symlink(context.Background(), target, "testSym", &out)
 	// 	if errno != 0 {
 	// 		t.Fatalf("FSNode.Symlink returned error: %v", errno)
 	// 	}
@@ -740,7 +747,8 @@ func TestFsNodeOperations(t *testing.T) {
 	// 		t.Fatalf("FSNode.Symlink returned nil inode")
 	// 	}
 
-	// 	symContent, errno := fsnode.Readlink(context.Background())
+	// 	linkNode := inode.Operations().(*FSNode)
+	// 	symContent, errno := linkNode.Readlink(context.Background())
 	// 	if errno != 0 {
 	// 		t.Fatalf("FSNode.Readlink returned error: %v", errno)
 	// 	}
@@ -770,4 +778,5 @@ func TestFsNodeOperations(t *testing.T) {
 		}
 	})
 
+	// TODO: Fsync, Setattr if
 }
