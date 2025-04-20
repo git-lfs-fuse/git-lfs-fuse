@@ -11,6 +11,7 @@ builds:
     goos:
       - linux
       - darwin
+    main: ./cmd/main.go
 
 archives:
   - formats: [tar.gz]
