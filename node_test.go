@@ -16,7 +16,6 @@ import (
 	"github.com/git-lfs/git-lfs/v3/config"
 	"github.com/git-lfs/git-lfs/v3/lfs"
 	"github.com/gorilla/mux"
-	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 )
 
@@ -661,20 +660,27 @@ func TestLimitedCacheSize(t *testing.T) {
 	}
 }
 
-func TestLBNodeOperations(t *testing.T) {
-	rootDir, err := os.MkdirTemp("", "lbnode_ops")
+func TestFsNodeOperations(t *testing.T) {
+	rootDir, err := os.MkdirTemp("", "fsnode_ops")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(rootDir)
 
-	rootNode, _ := fs.NewLoopbackRoot(rootDir)
-	lbnode := rootNode.(*fs.LoopbackNode)
+	if out, err := exec.Command("git", "init", "--initial-branch=main", rootDir).CombinedOutput(); err != nil {
+		t.Fatalf("git init failed: %s\n%v", out, err)
+	}
+	cfg := config.NewIn(rootDir, "")
+	node, err := NewGitLFSFuseRoot(rootDir, cfg, 1024)
+	if err != nil {
+		t.Fatalf("NewGitLFSFuseRoot error: %v", err)
+	}
+	fsnode := node.(*FSNode)
 
 	// Test Statfs
 	t.Run("Statfs", func(t *testing.T) {
 		var out fuse.StatfsOut
-		errno := lbnode.Statfs(context.Background(), &out)
+		errno := fsnode.Statfs(context.Background(), &out)
 		if errno != 0 {
 			t.Fatalf("FSNode.Statfs returned error: %v", errno)
 		}
@@ -684,7 +690,7 @@ func TestLBNodeOperations(t *testing.T) {
 	// t.Run("Mknod", func(t *testing.T) {
 	// 	testFile := "test_mknod.txt"
 	// 	var out fuse.EntryOut
-	// 	inode, errno := lbnode.Mknod(context.Background(), testFile, 0644, 0, &out)
+	// 	inode, errno := fsnode.Mknod(context.Background(), testFile, 0644, 0, &out)
 	// 	if errno != 0 {
 	// 		t.Fatalf("FSNode.Mknod returned error: %v", errno)
 	// 	}
@@ -701,12 +707,12 @@ func TestLBNodeOperations(t *testing.T) {
 			t.Fatalf("Failed to create subdirectory: %v", err)
 		}
 
-		_, errno := lbnode.Readdir(context.Background())
+		_, errno := fsnode.Readdir(context.Background())
 		if errno != 0 {
 			t.Fatalf("FSNode.Readdir returned error: %v", errno)
 		}
 
-		errno = lbnode.Rmdir(context.Background(), subdir)
+		errno = fsnode.Rmdir(context.Background(), subdir)
 		if errno != 0 {
 			t.Fatalf("FSNode.Rmdir returned error: %v", errno)
 		}
@@ -726,7 +732,7 @@ func TestLBNodeOperations(t *testing.T) {
 
 	// 	symFile := "testSym"
 	// 	var out fuse.EntryOut
-	// 	inode, errno := lbnode.Symlink(context.Background(), target, symFile, &out)
+	// 	inode, errno := fsnode.Symlink(context.Background(), target, symFile, &out)
 	// 	if errno != 0 {
 	// 		t.Fatalf("FSNode.Symlink returned error: %v", errno)
 	// 	}
@@ -734,7 +740,7 @@ func TestLBNodeOperations(t *testing.T) {
 	// 		t.Fatalf("FSNode.Symlink returned nil inode")
 	// 	}
 
-	// 	symContent, errno := lbnode.Readlink(context.Background())
+	// 	symContent, errno := fsnode.Readlink(context.Background())
 	// 	if errno != 0 {
 	// 		t.Fatalf("FSNode.Readlink returned error: %v", errno)
 	// 	}
@@ -748,17 +754,17 @@ func TestLBNodeOperations(t *testing.T) {
 		attrName := "user.testattr"
 		attrValue := []byte("testvalue")
 
-		errno := lbnode.Setxattr(context.Background(), attrName, attrValue, 0)
+		errno := fsnode.Setxattr(context.Background(), attrName, attrValue, 0)
 		if errno != 0 {
 			t.Fatalf("FSNode.Setxattr returned error: %v", errno)
 		}
 
-		_, errno = lbnode.Listxattr(context.Background(), nil)
+		_, errno = fsnode.Listxattr(context.Background(), nil)
 		if errno != 0 {
 			t.Fatalf("FSNode.Listxattr returned error: %v", errno)
 		}
 
-		errno = lbnode.Removexattr(context.Background(), attrName)
+		errno = fsnode.Removexattr(context.Background(), attrName)
 		if errno != 0 {
 			t.Fatalf("FSNode.Removexattr returned error: %v", errno)
 		}
