@@ -685,20 +685,19 @@ func TestFsNodeOperations(t *testing.T) {
 	srv, err := fs.Mount(mnt, fsnode, &fs.Options{NullPermissions: true})
 	defer srv.Unmount()
 
-	// Test Statfs
+	ctx := context.Background()
 	t.Run("Statfs", func(t *testing.T) {
 		var out fuse.StatfsOut
-		errno := fsnode.Statfs(context.Background(), &out)
+		errno := fsnode.Statfs(ctx, &out)
 		if errno != 0 {
 			t.Fatalf("FSNode.Statfs returned error: %v", errno)
 		}
 	})
 
-	// Test Mknod
 	t.Run("Mknod", func(t *testing.T) {
 		testFile := "test_mknod.txt"
 		var out fuse.EntryOut
-		inode, errno := fsnode.Mknod(context.Background(), testFile, fuse.S_IFREG|0644, 0, &out)
+		inode, errno := fsnode.Mknod(ctx, testFile, fuse.S_IFREG|0644, 0, &out)
 		if errno != 0 {
 			t.Fatalf("FSNode.Mknod returned error: %v", errno)
 		}
@@ -707,7 +706,6 @@ func TestFsNodeOperations(t *testing.T) {
 		}
 	})
 
-	// Test Rmdir and Readdir
 	t.Run("Rmdir_Readdir", func(t *testing.T) {
 		subdir := "testdir"
 		subdirPath := filepath.Join(root, subdir)
@@ -715,12 +713,12 @@ func TestFsNodeOperations(t *testing.T) {
 			t.Fatalf("Failed to create subdirectory: %v", err)
 		}
 
-		_, errno := fsnode.Readdir(context.Background())
+		_, errno := fsnode.Readdir(ctx)
 		if errno != 0 {
 			t.Fatalf("FSNode.Readdir returned error: %v", errno)
 		}
 
-		errno = fsnode.Rmdir(context.Background(), subdir)
+		errno = fsnode.Rmdir(ctx, subdir)
 		if errno != 0 {
 			t.Fatalf("FSNode.Rmdir returned error: %v", errno)
 		}
@@ -731,7 +729,6 @@ func TestFsNodeOperations(t *testing.T) {
 		}
 	})
 
-	// Test Symlink and Readlink
 	// t.Run("Symlink_Readlink", func(t *testing.T) {
 	// 	target := "targetFile"
 	// 	if err := os.WriteFile(filepath.Join(root, target), []byte("test"), 0644); err != nil {
@@ -739,7 +736,7 @@ func TestFsNodeOperations(t *testing.T) {
 	// 	}
 
 	// 	var out fuse.EntryOut
-	// 	inode, errno := fsnode.Symlink(context.Background(), target, "testSym", &out)
+	// 	inode, errno := fsnode.Symlink(ctx, target, "testSym", &out)
 	// 	if errno != 0 {
 	// 		t.Fatalf("FSNode.Symlink returned error: %v", errno)
 	// 	}
@@ -747,8 +744,12 @@ func TestFsNodeOperations(t *testing.T) {
 	// 		t.Fatalf("FSNode.Symlink returned nil inode")
 	// 	}
 
-	// 	linkNode := inode.Operations().(*FSNode)
-	// 	symContent, errno := linkNode.Readlink(context.Background())
+	// 	cn, errno := fsnode.Lookup(ctx, "testSym", &out)
+	// 	if errno != 0 {
+	// 		t.Fatalf("FSNode.Lookup returned error: %v", errno)
+	// 	}
+	// 	linkNode := cn.Operations().(*FSNode)
+	// 	symContent, errno := linkNode.Readlink(ctx)
 	// 	if errno != 0 {
 	// 		t.Fatalf("FSNode.Readlink returned error: %v", errno)
 	// 	}
@@ -757,26 +758,40 @@ func TestFsNodeOperations(t *testing.T) {
 	// 	}
 	// })
 
-	// Test setxattr, removexattr, listxattr
 	t.Run("Setxattr_Removexattr_Listxattr", func(t *testing.T) {
 		attrName := "user.testattr"
 		attrValue := []byte("testvalue")
 
-		errno := fsnode.Setxattr(context.Background(), attrName, attrValue, 0)
+		errno := fsnode.Setxattr(ctx, attrName, attrValue, 0)
 		if errno != 0 {
 			t.Fatalf("FSNode.Setxattr returned error: %v", errno)
 		}
 
-		_, errno = fsnode.Listxattr(context.Background(), nil)
+		_, errno = fsnode.Listxattr(ctx, nil)
 		if errno != 0 {
 			t.Fatalf("FSNode.Listxattr returned error: %v", errno)
 		}
 
-		errno = fsnode.Removexattr(context.Background(), attrName)
+		errno = fsnode.Removexattr(ctx, attrName)
 		if errno != 0 {
 			t.Fatalf("FSNode.Removexattr returned error: %v", errno)
 		}
 	})
 
-	// TODO: Fsync, Setattr if
+	t.Run("Fsync", func(t *testing.T) {
+		fh, _, errno := fsnode.Open(ctx, uint32(os.O_RDONLY))
+		if errno != 0 {
+			t.Fatalf("FSNode.Open returned error: %v", errno)
+		}
+
+		errno = fsnode.Fsync(ctx, fh, uint32(os.O_RDWR))
+		if errno != 0 {
+			t.Fatalf("FSNode.Fsync returned error: %v", errno)
+		}
+
+		errno = fsnode.Release(ctx, fh)
+		if errno != 0 {
+			t.Fatalf("FSNode.Release returned error: %v", errno)
+		}
+	})
 }
