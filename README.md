@@ -20,6 +20,14 @@ Download prebuilt binaries from https://github.com/git-lfs-fuse/git-lfs-fuse/rel
 git-lfs-fuse mount https://huggingface.co/datasets/nvidia/OpenCodeReasoning
 ```
 
+### Clean up and unmount
+
+If a user-space program crashes during a FUSE operation, or if `git-lfs-fuse` encounters an error, the FUSE module may get stuck in kernel space, preventing clean shutdown.
+In such cases, you may need to manually unmount the FUSE mount point:
+```sh
+sudo fusermount3 -u <mount-dir> 
+```
+
 ## Requirements
 
 - FUSE support on your operating system (Linux, Windows WSL 2, macOS with [macFUSE](https://macfuse.github.io/) installed).
