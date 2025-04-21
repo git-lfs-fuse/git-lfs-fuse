@@ -97,8 +97,13 @@ func (p *pageFetcher) download(ctx context.Context, w io.Writer, a action, off, 
 	}
 	if resp != nil && resp.Body != nil {
 		defer func() {
-			_, _ = io.Copy(io.Discard, resp.Body)
-			_ = resp.Body.Close()
+			// Drain the body to allow connection reuse.
+			if _, copyErr := io.Copy(io.Discard, resp.Body); err != nil {
+				log.Printf("error draining response body: %+v\n", copyErr)
+			}
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				log.Printf("error closing response body: %+v\n", closeErr)
+			}
 		}()
 	}
 	if resp != nil && resp.StatusCode == http.StatusTooManyRequests {
@@ -173,11 +178,7 @@ func (p *pageFetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, 
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	err = p.lru.Add(ptr.Oid, pageNum)
-	if err != nil {
-		return err
-	}
-	return err
+	return p.lru.Add(ptr.Oid, pageNum)
 }
 
 type retryErr struct {
