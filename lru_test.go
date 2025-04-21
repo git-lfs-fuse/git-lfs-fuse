@@ -1,6 +1,7 @@
 package gitlfsfuse
 
 import (
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -434,8 +435,57 @@ func TestLRUList_Add_MoveToBack(t *testing.T) {
 	if lru.tail.prev == nil || lru.tail.prev.key != "key1" {
 		t.Errorf("Expected key1 to be at the back of the list, got %v", lru.tail.prev.key)
 	}
-	
+
 	if lru.head.next == nil || lru.head.next.key != "key2" {
 		t.Errorf("Expected key2 to be at the front of the list, got %v", lru.head.next.key)
+	}
+}
+
+func TestCorruptedLogLine_InvalidOperation(t *testing.T) {
+	logFile := "test_invalid_op.log"
+	defer os.Remove(logFile)
+
+	content := "X oid1 page1\n" // Invalid operation 'X'
+	err := os.WriteFile(logFile, []byte(content), 0644)
+	if err != nil {
+		t.Fatalf("Failed to write log file: %v", err)
+	}
+
+	_, err = NewDoubleLRU(logFile)
+	if err == nil || !strings.Contains(err.Error(), "Invald operation") {
+		t.Errorf("Expected error for invalid op, got: %v", err)
+	}
+}
+
+type errorScanner struct{}
+
+func (e *errorScanner) Scan() bool           { return true }
+func (e *errorScanner) Text() string         { return "A oid1 page1" }
+func (e *errorScanner) Err() error           { return errors.New("scan failed") }
+
+func TestScannerError(t *testing.T) {
+	lru := &doubleLRU{
+		lruLogPath: "test_lru_scan.log",
+	}
+
+	// Manually override replayLog to simulate scanner error
+	file, err := os.Create(lru.lruLogPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file.WriteString("A oid1 page1\n")
+	file.Close()
+
+	// Patch bufio.NewScanner to inject an error would require major refactor.
+	// Easier fix: simulate a corrupt file (e.g., very long line)
+	corrupt := strings.Repeat("a", 10_000_000) // larger than bufio.Scanner buffer
+	err = os.WriteFile(lru.lruLogPath, []byte(corrupt), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = lru.replayLog()
+	if err == nil {
+		t.Error("Expected error from scanner.Err(), got nil")
 	}
 }
