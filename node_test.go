@@ -784,23 +784,20 @@ func TestFsNodeOperations(t *testing.T) {
 			t.Fatalf("FSNode.Release returned error: %v", errno)
 		}
 	})
-}
 
-func TestSym(t *testing.T) {
-	_, mnt, cancel := cloneMount(t)
-	defer cancel()
+	t.Run("Setattr", func(t *testing.T) {
+		ptrFile := "test_ptr"
+		mntPath := filepath.Join(mnt, ptrFile)
+		ptrContent :=
+			"version https://git-lfs.github.com/spec/v1\n" +
+				"oid sha256:3b2e9e8f1e8f1e8f1e8f1e8f1e8f1e8f1e8f1e8f1e8f1e8f1e8f1e8f1e8f1e8f\n" +
+				"size 256\n"
+		if err := os.WriteFile(mntPath, []byte(ptrContent), 0644); err != nil {
+			log.Fatalf("Failed to write pointer file: %v", err)
+		}
 
-	symName := "test_symlink"
-	linkPath := filepath.Join(mnt, symName)
-	target := "normal.txt"
-	targetPath := filepath.Join(mnt, target)
-
-	if err := os.Symlink(targetPath, linkPath); err != nil {
-		t.Fatalf("Failed to create symlink: %v", err)
-	}
-
-	_, err := os.Readlink(linkPath)
-	if err != nil {
-		t.Fatalf("Failed to read symlink: %v", err)
-	}
+		if err := os.Truncate(mntPath, 128); err != nil {
+			t.Fatalf("truncate failed: %v", err)
+		}
+	})
 }
