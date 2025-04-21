@@ -489,3 +489,20 @@ func TestScannerError(t *testing.T) {
 		t.Error("Expected error from scanner.Err(), got nil")
 	}
 }
+
+func TestDoubleLRU_Add_LogFail(t *testing.T) {
+    dir := t.TempDir()
+    // Intentionally use a directory as the log path to cause a write error
+    lru := &doubleLRU{
+        oidMap:     make(map[string]*oidEntry),
+        oidList:    NewLRUList(),
+        size:       0,
+        doLog:      true,
+        lruLogPath: dir, // not a file — will cause logOperation to fail
+    }
+
+    err := lru.Add("oid1", "page1")
+    if err == nil {
+        t.Fatal("Expected error due to log failure, but got nil")
+    }
+}
