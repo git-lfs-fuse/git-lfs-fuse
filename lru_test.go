@@ -423,3 +423,19 @@ func TestCorruptedLogLine(t *testing.T) {
 		t.Errorf("Expected error due to corrupted log line, got nil")
 	}
 }
+
+func TestLRUList_Add_MoveToBack(t *testing.T) {
+	lru := NewLRUList()
+
+	lru.Add("key1")
+	lru.Add("key2")
+	lru.Add("key1")
+
+	if lru.tail.prev == nil || lru.tail.prev.key != "key1" {
+		t.Errorf("Expected key1 to be at the back of the list, got %v", lru.tail.prev.key)
+	}
+	
+	if lru.head.next == nil || lru.head.next.key != "key2" {
+		t.Errorf("Expected key2 to be at the front of the list, got %v", lru.head.next.key)
+	}
+}
