@@ -729,34 +729,24 @@ func TestFsNodeOperations(t *testing.T) {
 		}
 	})
 
-	// t.Run("Symlink_Readlink", func(t *testing.T) {
-	// 	target := "targetFile"
-	// 	if err := os.WriteFile(filepath.Join(root, target), []byte("test"), 0644); err != nil {
-	// 		t.Fatalf("Failed to create target file: %v", err)
-	// 	}
+	t.Run("Symlink_Readlink", func(t *testing.T) {
+		symName := "test_symlink"
+		linkPath := filepath.Join(mnt, symName)
+		target := "target.txt"
+		targetPath := filepath.Join(mnt, target)
+		if err := os.WriteFile(targetPath, []byte("target content"), 0644); err != nil {
+			t.Fatalf("Failed to create target file: %v", err)
+		}
 
-	// 	var out fuse.EntryOut
-	// 	inode, errno := fsnode.Symlink(ctx, target, "testSym", &out)
-	// 	if errno != 0 {
-	// 		t.Fatalf("FSNode.Symlink returned error: %v", errno)
-	// 	}
-	// 	if inode == nil {
-	// 		t.Fatalf("FSNode.Symlink returned nil inode")
-	// 	}
+		if err := os.Symlink(targetPath, linkPath); err != nil {
+			t.Fatalf("Failed to create symlink: %v", err)
+		}
 
-	// 	cn, errno := fsnode.Lookup(ctx, "testSym", &out)
-	// 	if errno != 0 {
-	// 		t.Fatalf("FSNode.Lookup returned error: %v", errno)
-	// 	}
-	// 	linkNode := cn.Operations().(*FSNode)
-	// 	symContent, errno := linkNode.Readlink(ctx)
-	// 	if errno != 0 {
-	// 		t.Fatalf("FSNode.Readlink returned error: %v", errno)
-	// 	}
-	// 	if string(symContent) != target {
-	// 		t.Fatalf("Readlink target mismatch: got %q, want %q", symContent, target)
-	// 	}
-	// })
+		_, err := os.Readlink(linkPath)
+		if err != nil {
+			t.Fatalf("Failed to read symlink: %v", err)
+		}
+	})
 
 	t.Run("Setxattr_Removexattr_Listxattr", func(t *testing.T) {
 		attrName := "user.testattr"
@@ -794,4 +784,23 @@ func TestFsNodeOperations(t *testing.T) {
 			t.Fatalf("FSNode.Release returned error: %v", errno)
 		}
 	})
+}
+
+func TestSym(t *testing.T) {
+	_, mnt, cancel := cloneMount(t)
+	defer cancel()
+
+	symName := "test_symlink"
+	linkPath := filepath.Join(mnt, symName)
+	target := "normal.txt"
+	targetPath := filepath.Join(mnt, target)
+
+	if err := os.Symlink(targetPath, linkPath); err != nil {
+		t.Fatalf("Failed to create symlink: %v", err)
+	}
+
+	_, err := os.Readlink(linkPath)
+	if err != nil {
+		t.Fatalf("Failed to read symlink: %v", err)
+	}
 }
