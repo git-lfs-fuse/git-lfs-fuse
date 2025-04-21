@@ -4,13 +4,19 @@ Mount remote repositories and datasets managed by Git LFS locally.
 
 ## Features
 
-- **Faster Clone and Checkout**: Git LFS tracked files are downloaded by pages (2MiB per page) on-demand.
-- **Work with Limited Storage**: Pages are cached on local disk limited by the `max-pages` config (default: 5120).
+- **Faster Clone and Checkout**: Git LFS tracked files are downloaded by pages (2MiB per page) on demand.
+- **Work with Limited Storage**: Pages are cached locally and limited by the `max-pages` config (default: 5120).
 
 ## Getting Started
 
+### Installation
+
+Download prebuilt binaries from https://github.com/git-lfs-fuse/git-lfs-fuse/releases.
+
+### Mount your repository or dataset
+
 ```bash
-# For example:
+# For example, to mount a huggingface dataset:
 git-lfs-fuse mount https://huggingface.co/datasets/nvidia/OpenCodeReasoning
 ```
 
