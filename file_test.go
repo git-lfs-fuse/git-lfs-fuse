@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"syscall"
 	"testing"
 
@@ -22,9 +23,12 @@ import (
 
 type fetcher struct {
 	f *os.File
+	m sync.Mutex
 }
 
-func (f *fetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, off, end, size int64, pageNum string) error {
+func (f *fetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, off, end, size, pageNum int64) error {
+	f.m.Lock()
+	defer f.m.Unlock()
 	if _, err := f.f.Seek(off, io.SeekStart); err != nil {
 		return err
 	}
@@ -332,7 +336,7 @@ type errFetcher struct {
 	err error
 }
 
-func (f *errFetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, off, end, size int64, pageNum string) error {
+func (f *errFetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, off, end, size, pageNum int64) error {
 	return f.err
 }
 

@@ -70,6 +70,7 @@ var _ = (fs.FileSetattrer)((*RemoteFile)(nil))
 //var _ = (fs.FileLseeker)((*RemoteFile)(nil))
 
 const pagesize = 2 * 1024 * 1024
+const defaultpreload = 5
 
 func createSymlink(path, dest string) (err error) {
 	if _, err = os.Lstat(dest); err != nil { // make sure the dest file exists.
@@ -119,7 +120,7 @@ func replaceLinkFile(path string) (*os.File, error) {
 	return file, err
 }
 
-func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, int64, error) {
+func (f *RemoteFile) getPage(ctx context.Context, off, preload int64) (*os.File, int64, int64, error) {
 	pageNum := off / pagesize
 	pageOff := pageNum * pagesize
 	pageEnd := pageOff + pagesize
@@ -135,13 +136,25 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, i
 		if page, err = os.OpenFile(pagePth, os.O_RDWR, 0666); err == nil {
 			return page, pageOff, pageEnd - pageOff, nil
 		}
+
+		if preload--; preload > 0 {
+			totalPages := (f.sz + pagesize - 1) / pagesize
+			preloadPage := (pageNum + 1) % totalPages
+			go func(off, preload int64) {
+				p, _, _, _ := f.getPage(context.Background(), off, preload)
+				if p != nil {
+					_ = p.Close()
+				}
+			}(preloadPage*pagesize, preload)
+		}
+
 		err = createSymlink(pagePth, destPth)
 		if pageOff < f.tc && errors.Is(err, os.ErrNotExist) {
 			dest, err := createFile(destPth)
 			if err != nil {
 				return nil, 0, 0, err
 			}
-			if err = f.pf.Fetch(ctx, dest, f.ptr, pageOff, min(pageEnd, f.sz), f.sz, pageStr); err == nil {
+			if err = f.pf.Fetch(ctx, dest, f.ptr, pageOff, min(pageEnd, f.sz), f.sz, pageNum); err == nil {
 				// make sure every page has the same size.
 				err = dest.Truncate(pagesize)
 			}
@@ -181,7 +194,7 @@ func (f *RemoteFile) getPage(ctx context.Context, off int64) (*os.File, int64, i
 }
 
 func (f *RemoteFile) getPageForWrite(ctx context.Context, off int64) (*os.File, int64, int64, error) {
-	page, pageOff, size, err := f.getPage(ctx, off)
+	page, pageOff, size, err := f.getPage(ctx, off, defaultpreload)
 	if err == nil {
 		_ = page.Close()
 		pageNum := off / pagesize
@@ -206,7 +219,7 @@ func (f *RemoteFile) Read(ctx context.Context, buf []byte, off int64) (res fuse.
 	var readn, n int
 	var bufbk = buf
 next:
-	page, pageOff, size, err := f.getPage(ctx, off)
+	page, pageOff, size, err := f.getPage(ctx, off, defaultpreload)
 	if err == nil {
 		shiftOff := off - pageOff
 		n, err = page.ReadAt(buf[:min(int64(len(buf)), size-shiftOff)], shiftOff)

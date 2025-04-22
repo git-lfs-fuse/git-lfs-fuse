@@ -648,7 +648,7 @@ func TestLimitedCacheSize(t *testing.T) {
 
 	// Get the initial page count before accessing any files
 	if count, err := countSharedPages(); err != nil || count != 0 {
-		t.Fatal("failed to count shared pages")
+		t.Error("failed to count shared pages", count, err)
 	}
 
 	_ = verifyRemoteFile(t, hid, mnt, "emptylarge.bin")
@@ -656,8 +656,8 @@ func TestLimitedCacheSize(t *testing.T) {
 	_ = verifyRemoteFile(t, hid, mnt, "emptylarge2.bin")
 	_ = verifyRemoteFile(t, hid, mnt, "emptylarge.bin")
 
-	if count, err := countSharedPages(); err != nil || count != smallCacheSize {
-		t.Fatal("failed to count shared pages")
+	if count, err := countSharedPages(); err != nil || count > defaultpreload {
+		t.Error("failed to count shared pages", count, err)
 	}
 }
 

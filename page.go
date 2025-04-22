@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -28,7 +27,7 @@ type action struct {
 }
 
 type PageFetcher interface {
-	Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, off, end, size int64, pageNum string) error
+	Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, off, end, size, pageNum int64) error
 }
 
 type pageFetcher struct {
@@ -135,10 +134,10 @@ func (p *pageFetcher) download(ctx context.Context, w io.Writer, a action, off, 
 	return off + n, err
 }
 
-func (p *pageFetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, off, end, size int64, pageNum string) error {
+func (p *pageFetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, off, end, size, pageNum int64) error {
 	// TODO: single flight by ptr.Oid+range and make it asyncable.
 	p.mu.Lock()
-	for p.lru.Size() >= p.maxPages {
+	for p.lru.Size() >= p.maxPages-1 {
 		oid, pn := p.lru.First()
 		path := filepath.Join(p.pr, oid, "shared", pn)
 		if !p.pl.TryLock(path) {
@@ -158,7 +157,11 @@ func (p *pageFetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, 
 		}
 		p.pl.Unlock(path)
 	}
+	err := p.lru.Add(ptr.Oid, strconv.FormatInt(pageNum, 10))
 	p.mu.Unlock()
+	if err != nil {
+		return err
+	}
 
 	a, err := p.getAction(ctx, ptr.Oid, size)
 	if err != nil {
@@ -167,18 +170,13 @@ func (p *pageFetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, 
 	var r *retryErr
 	for nextOff := off; nextOff < end && err == nil; {
 		nextOff, err = p.download(ctx, w, a, nextOff, end)
-		log.Printf("fetch: oid=(%s) %dMB %s/%d err=%v", ptr.Oid, pagesize/(1024*1024), pageNum, int64(math.Ceil(float64(size/pagesize))), err)
+		log.Printf("fetch: oid=(%s) %dMB %d/%d err=%v", ptr.Oid, pagesize/(1024*1024), pageNum+1, (size+pagesize-1)/pagesize, err)
 		if errors.As(err, &r) {
 			err = nil
 			time.Sleep(r.after)
 		}
 	}
-	if err != nil {
-		return err
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.lru.Add(ptr.Oid, pageNum)
+	return err
 }
 
 type retryErr struct {
