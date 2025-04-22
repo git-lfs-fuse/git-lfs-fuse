@@ -1,5 +1,7 @@
 # git-lfs-fuse
 
+[繁體中文](README.zh-TW.md) | [簡體中文](README.zh-CN.md)
+
 Mount remote repositories and datasets managed by Git LFS locally.
 
 ## Features
@@ -11,7 +13,7 @@ Mount remote repositories and datasets managed by Git LFS locally.
 
 ### Installation
 
-Download prebuilt binaries from https://github.com/git-lfs-fuse/git-lfs-fuse/releases.
+Download prebuilt binaries from [release page](https://github.com/git-lfs-fuse/git-lfs-fuse/releases).
 
 ### Mount your repository or dataset
 
@@ -22,11 +24,11 @@ git-lfs-fuse mount https://huggingface.co/datasets/nvidia/OpenCodeReasoning
 
 ### Clean up and unmount
 
-If a user-space program crashes during a FUSE operation, or if `git-lfs-fuse` encounters an error, the FUSE module may get stuck in kernel space, preventing clean shutdown.
-In such cases, you may need to manually unmount the FUSE mount point:
+If a user-space program crashes during a FUSE operation, or if `git-lfs-fuse` encounters an error, the FUSE module may get stuck in kernel space, preventing clean shutdown. In such cases, you may need to manually unmount the FUSE mount point:
+
 ```sh
 # Linux.
-sudo fusermount3 -u <mount-dir> 
+sudo fusermount3 -u <mount-dir>
 ```
 
 ## Requirements
@@ -36,10 +38,9 @@ sudo fusermount3 -u <mount-dir>
 
 ## Roadmap
 
-* NFS v3 or v4.
-* Git submodule.
+- NFS v3 or v4.
+- Git submodule.
 
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
-
