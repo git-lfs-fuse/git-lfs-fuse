@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/git-lfs/git-lfs/v3/config"
-	"github.com/git-lfs/git-lfs/v3/errors"
 	"github.com/git-lfs/git-lfs/v3/lfs"
 	"github.com/git-lfs/git-lfs/v3/lfsapi"
 	"github.com/git-lfs/git-lfs/v3/tq"
@@ -26,7 +25,7 @@ import (
 
 type FSNode struct {
 	fs.LoopbackNode
-	rf map[uint64]*RemoteFile
+	rf *RemoteFile
 	mu sync.RWMutex
 }
 
@@ -123,7 +122,8 @@ func (n *FSNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuse
 	}
 
 	n.mu.RLock()
-	if rf, ok := n.rf[ino]; ok {
+	rf := n.rf
+	if rf != nil {
 		rf.Refs.Add(1)
 		n.mu.RUnlock()
 		return rf, 0, 0
@@ -144,14 +144,15 @@ func (n *FSNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuse
 		return nil, 0, fs.ToErrno(err)
 	}
 
-	rf := metadata.NewRemoteFile(ptr, ino, f)
+	rf = metadata.NewRemoteFile(ptr, ino, f)
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	if rf2, ok := n.rf[ino]; ok {
+	rf2 := n.rf
+	if rf2 != nil {
 		rf = rf2
 		_ = syscall.Close(f)
 	} else {
-		n.rf[ino] = rf
+		n.rf = rf
 	}
 	rf.Refs.Add(1)
 	return rf, 0, 0
@@ -174,21 +175,16 @@ func (n *FSNode) Flush(ctx context.Context, f fs.FileHandle) syscall.Errno {
 }
 
 func (n *FSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
-	if f != nil {
-		if writer, ok := f.(*RemoteFile); ok {
-			n.mu.Lock()
-			defer n.mu.Unlock()
-			if writer.Refs.Add(-1) == 0 {
-				delete(n.rf, writer.Ino)
-				return writer.Release(ctx)
-			}
-			return 0
-		}
-		if writer, ok := f.(fs.FileReleaser); ok {
+	if writer, ok := f.(*RemoteFile); ok {
+		n.mu.Lock()
+		defer n.mu.Unlock()
+		if writer.Refs.Add(-1) == 0 {
+			n.rf = nil
 			return writer.Release(ctx)
 		}
+		return 0
 	}
-	return fs.ToErrno(errors.New("f is not a FileReleaser " + n.path()))
+	return f.(fs.FileReleaser).Release(ctx)
 }
 
 func (n *FSNode) OpendirHandle(ctx context.Context, flags uint32) (fs.FileHandle, uint32, syscall.Errno) {
@@ -200,12 +196,8 @@ func (n *FSNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 }
 
 func (n *FSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	ino, err := generateFid(n.path())
-	if err != nil {
-		return fs.ToErrno(err)
-	}
 	n.mu.RLock()
-	if rf, ok := n.rf[ino]; ok {
+	if rf := n.rf; rf != nil {
 		defer n.mu.RUnlock()
 		defer n.fixAttr(&out.Attr, "")
 		return rf.Getattr(ctx, out)
@@ -222,7 +214,7 @@ func (n *FSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrI
 		return fs.ToErrno(err)
 	}
 	n.mu.RLock()
-	if rf, ok := n.rf[ino]; ok {
+	if rf := n.rf; rf != nil {
 		defer n.mu.RUnlock()
 		defer n.fixAttr(&out.Attr, "")
 		return rf.Setattr(ctx, in, out)
@@ -238,7 +230,8 @@ func (n *FSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrI
 			rf := metadata.NewRemoteFile(ptr, ino, f)
 			n.mu.Lock()
 			defer n.mu.Unlock()
-			if rf2, ok := n.rf[ino]; ok {
+			rf2 := n.rf
+			if rf2 != nil {
 				rf = rf2
 			}
 			defer n.fixAttr(&out.Attr, "")
@@ -371,7 +364,8 @@ func NewGitLFSFuseRoot(rootPath string, cfg *config.Configuration, maxPages int6
 		Path: rootPath,
 		Dev:  uint64(st.Dev),
 		NewNode: func(rootData *fs.LoopbackRoot, parent *fs.LoopbackNode, name string, st *syscall.Stat_t) fs.InodeEmbedder {
-			node := &FSNode{rf: make(map[uint64]*RemoteFile), LoopbackNode: fs.LoopbackNode{RootData: rootData, Metadata: &FSNodeData{NewRemoteFile: newRemoteFile}}}
+			fmt.Println("NewNode", name)
+			node := &FSNode{rf: nil, LoopbackNode: fs.LoopbackNode{RootData: rootData, Metadata: &FSNodeData{NewRemoteFile: newRemoteFile}}}
 			if (parent != nil && parent.Metadata.(*FSNodeData).Ignore) || name == ".git" {
 				node.Metadata.(*FSNodeData).Ignore = true
 			}
