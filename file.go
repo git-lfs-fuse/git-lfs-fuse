@@ -58,9 +58,6 @@ var _ = (fs.FileReleaser)((*RemoteFile)(nil))
 var _ = (fs.FileGetattrer)((*RemoteFile)(nil))
 var _ = (fs.FileReader)((*RemoteFile)(nil))
 var _ = (fs.FileWriter)((*RemoteFile)(nil))
-var _ = (fs.FileGetlker)((*RemoteFile)(nil))
-var _ = (fs.FileSetlker)((*RemoteFile)(nil))
-var _ = (fs.FileSetlkwer)((*RemoteFile)(nil))
 var _ = (fs.FileFlusher)((*RemoteFile)(nil))
 var _ = (fs.FileFsyncer)((*RemoteFile)(nil))
 var _ = (fs.FileSetattrer)((*RemoteFile)(nil))
@@ -303,18 +300,6 @@ func (f *RemoteFile) Flush(ctx context.Context) syscall.Errno {
 
 func (f *RemoteFile) Fsync(ctx context.Context, flags uint32) (errno syscall.Errno) {
 	return f.LoopbackFile.Fsync(ctx, flags)
-}
-
-func (f *RemoteFile) Getlk(ctx context.Context, owner uint64, lk *fuse.FileLock, flags uint32, out *fuse.FileLock) (errno syscall.Errno) {
-	return f.LoopbackFile.Getlk(ctx, owner, lk, flags, out)
-}
-
-func (f *RemoteFile) Setlk(ctx context.Context, owner uint64, lk *fuse.FileLock, flags uint32) (errno syscall.Errno) {
-	return f.LoopbackFile.Setlk(ctx, owner, lk, flags)
-}
-
-func (f *RemoteFile) Setlkw(ctx context.Context, owner uint64, lk *fuse.FileLock, flags uint32) (errno syscall.Errno) {
-	return f.LoopbackFile.Setlkw(ctx, owner, lk, flags)
 }
 
 func (f *RemoteFile) fixAttr(out *fuse.AttrOut) {

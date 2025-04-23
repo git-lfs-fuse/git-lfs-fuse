@@ -158,39 +158,19 @@ func (n *FSNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuse
 }
 
 func (n *FSNode) Read(ctx context.Context, f fs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
-	if f != nil {
-		if reader, ok := f.(fs.FileReader); ok {
-			return reader.Read(ctx, dest, off)
-		}
-	}
-	return nil, fs.ToErrno(errors.New("f is not a FileReader " + n.path()))
+	return f.(fs.FileReader).Read(ctx, dest, off)
 }
 
 func (n *FSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, off int64) (written uint32, errno syscall.Errno) {
-	if f != nil {
-		if writer, ok := f.(fs.FileWriter); ok {
-			return writer.Write(ctx, data, off)
-		}
-	}
-	return 0, fs.ToErrno(errors.New("f is not a FileWriter " + n.path()))
+	return f.(fs.FileWriter).Write(ctx, data, off)
 }
 
 func (n *FSNode) Fsync(ctx context.Context, f fs.FileHandle, flags uint32) syscall.Errno {
-	if f != nil {
-		if writer, ok := f.(fs.FileFsyncer); ok {
-			return writer.Fsync(ctx, flags)
-		}
-	}
-	return fs.ToErrno(errors.New("f is not a FileFsyncer " + n.path()))
+	return f.(fs.FileFsyncer).Fsync(ctx, flags)
 }
 
 func (n *FSNode) Flush(ctx context.Context, f fs.FileHandle) syscall.Errno {
-	if f != nil {
-		if writer, ok := f.(fs.FileFlusher); ok {
-			return writer.Flush(ctx)
-		}
-	}
-	return fs.ToErrno(errors.New("f is not a FileFlusher " + n.path()))
+	return f.(fs.FileFlusher).Flush(ctx)
 }
 
 func (n *FSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
