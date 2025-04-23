@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	lts "github.com/git-lfs-fuse/lfs-test-server"
@@ -799,6 +800,47 @@ func TestFsNodeOperations(t *testing.T) {
 		if err := os.Truncate(mntPath, 128); err != nil {
 			t.Fatalf("truncate failed: %v", err)
 		}
+	})
+
+	t.Run("ConcurrentOpen", func(t *testing.T) {
+		ptrFile := "test_ptr_concurrent"
+		mntPath := filepath.Join(mnt, ptrFile)
+		ptrContent :=
+			"version https://git-lfs.github.com/spec/v1\n" +
+				"oid sha256:3b2e9e8f1e8f1e8f1e8f1e8f1e8f1e8f1e8f1e8f1e8f1e8f1e8f1e8f1e8f1e8f\n" +
+				"size 256\n"
+		if err := os.WriteFile(mntPath, []byte(ptrContent), 0644); err != nil {
+			log.Fatalf("Failed to write pointer file: %v", err)
+		}
+
+		var wg sync.WaitGroup
+		files := make([]*os.File, 100)
+		wg.Add(100)
+		for i := 0; i < 100; i++ {
+			go func(i int) {
+				defer wg.Done()
+				files[i], err = os.OpenFile(mntPath, os.O_RDONLY, 0644)
+				if err != nil {
+					t.Errorf("failed to open file: %v", err)
+				}
+				fi, err := files[i].Stat()
+				if err != nil {
+					t.Errorf("failed to open file: %v", err)
+				}
+				if fi.Size() != 256 {
+					t.Errorf("file size mismatch: got %d, want %d", fi.Size(), 256)
+				}
+			}(i)
+		}
+		wg.Wait()
+		wg.Add(100)
+		for i := 0; i < 100; i++ {
+			go func(i int) {
+				defer wg.Done()
+				_ = files[i].Close()
+			}(i)
+		}
+		wg.Wait()
 	})
 }
 
