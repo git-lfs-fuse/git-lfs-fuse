@@ -801,3 +801,35 @@ func TestFsNodeOperations(t *testing.T) {
 		}
 	})
 }
+
+func TestE2EFileOperation(t *testing.T) {
+	_, mnt, cancel := cloneMount(t)
+	defer cancel()
+
+	t.Run("Fsync", func(t *testing.T) {
+		p := filepath.Join(mnt, "emptylarge.bin")
+		f, err := os.OpenFile(p, os.O_RDWR, 0644)
+		if err != nil {
+			t.Fatalf("failed to open file: %v", err)
+		}
+		if err := f.Truncate(0); err != nil {
+			t.Fatalf("failed to truncate file: %v", err)
+		}
+		if _, err := f.WriteString("new content"); err != nil {
+			t.Fatalf("failed to write file: %v", err)
+		}
+		if err := f.Sync(); err != nil {
+			t.Fatalf("failed to sync file: %v", err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatalf("failed to close file: %v", err)
+		}
+		out, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("failed to read file: %v", err)
+		}
+		if string(out) != "new content" {
+			t.Fatalf("file content mismatch: got %q, want %q", out, "new content")
+		}
+	})
+}
