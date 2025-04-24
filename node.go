@@ -121,14 +121,13 @@ func (n *FSNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuse
 		return nil, 0, fs.ToErrno(err)
 	}
 
-	n.mu.RLock()
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	rf := n.rf
 	if rf != nil {
 		rf.Refs.Add(1)
-		n.mu.RUnlock()
 		return rf, 0, 0
 	}
-	n.mu.RUnlock()
 
 	ptr, _ := lfs.DecodePointerFromFile(p)
 	if ptr == nil {
@@ -145,15 +144,7 @@ func (n *FSNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuse
 	}
 
 	rf = metadata.NewRemoteFile(ptr, ino, f)
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	rf2 := n.rf
-	if rf2 != nil {
-		rf = rf2
-		_ = syscall.Close(f)
-	} else {
-		n.rf = rf
-	}
+	n.rf = rf
 	rf.Refs.Add(1)
 	return rf, 0, 0
 }
@@ -213,13 +204,12 @@ func (n *FSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrI
 	if err != nil {
 		return fs.ToErrno(err)
 	}
-	n.mu.RLock()
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	if rf := n.rf; rf != nil {
-		defer n.mu.RUnlock()
 		defer n.fixAttr(&out.Attr, "")
 		return rf.Setattr(ctx, in, out)
 	}
-	n.mu.RUnlock()
 	if metadata := n.Metadata.(*FSNodeData); !n.IsDir() && !metadata.Ignore && in.Size < 1024 {
 		if ptr, _ := lfs.DecodePointerFromFile(p); ptr != nil {
 			f, err := syscall.Open(p, os.O_RDWR, 0)
@@ -228,12 +218,6 @@ func (n *FSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrI
 			}
 			defer syscall.Close(f)
 			rf := metadata.NewRemoteFile(ptr, ino, f)
-			n.mu.Lock()
-			defer n.mu.Unlock()
-			rf2 := n.rf
-			if rf2 != nil {
-				rf = rf2
-			}
 			defer n.fixAttr(&out.Attr, "")
 			return rf.Setattr(ctx, in, out)
 		}
@@ -419,39 +403,39 @@ func CloneMount(remote, mountPoint string, directMount bool, gitOptions []string
 		git.Stderr = os.Stderr
 		git.Env = os.Environ()
 		git.Env = append(git.Env, "GIT_LFS_SKIP_SMUDGE=1")
-		if err := git.Run(); err != nil {
+		err := git.Run()
+		if err == nil {
+			lfo := lfs.FilterOptions{
+				GitConfig:  cfg.GitConfig(),
+				Force:      true,
+				Local:      true,
+				SkipSmudge: true,
+			}
+			err = lfo.Install()
+		}
+		if err != nil {
 			return "", "", nil, err
 		}
-		lfo := lfs.FilterOptions{
-			GitConfig:  cfg.GitConfig(),
-			Force:      true,
-			Local:      true,
-			SkipSmudge: true,
-		}
-		if err := lfo.Install(); err != nil {
-			return "", "", nil, err
-		}
-	} else if !info.IsDir() {
-		return "", "", nil, fmt.Errorf("%s is not a directory", hid)
 	}
 
+	var server *Server
 	pxy, err := NewGitLFSFuseRoot(hid, cfg, maxPages)
-	if err != nil {
-		return "", "", nil, err
+	if err == nil {
+		err = os.MkdirAll(mnt, 0755)
 	}
-	if err := os.MkdirAll(mnt, 0755); err != nil {
-		return "", "", nil, err
+	if err == nil {
+		var svc *fuse.Server
+		svc, err = fs.Mount(mnt, pxy, &fs.Options{
+			NullPermissions: true, // Leave file permissions on "000" files as-is
+			MountOptions: fuse.MountOptions{
+				DirectMount: directMount,
+				FsName:      dst,
+				Name:        "git-lfs",
+			},
+		})
+		if err == nil {
+			server = &Server{svc: svc}
+		}
 	}
-	svc, err := fs.Mount(mnt, pxy, &fs.Options{
-		NullPermissions: true, // Leave file permissions on "000" files as-is
-		MountOptions: fuse.MountOptions{
-			DirectMount: directMount,
-			FsName:      dst,
-			Name:        "git-lfs",
-		},
-	})
-	if err != nil {
-		return "", "", nil, err
-	}
-	return hid, mnt, &Server{svc: svc}, nil
+	return hid, mnt, server, err
 }
