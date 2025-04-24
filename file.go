@@ -330,11 +330,8 @@ func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 			return fs.ToErrno(err)
 		}
 		for _, p := range pages {
-			if p.IsDir() || p.Name() == "tc" {
-				continue
-			}
 			pageNum, err := strconv.ParseInt(p.Name(), 10, 64)
-			if err != nil {
+			if err != nil || p.IsDir() {
 				continue
 			}
 			path := filepath.Join(f.pr, p.Name())
