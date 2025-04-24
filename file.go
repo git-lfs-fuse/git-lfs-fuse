@@ -312,12 +312,12 @@ func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 	defer f.fixAttr(out)
 
 	szPath := filepath.Join(f.ps, "tc")
-	if _, err := os.Stat(szPath); errors.Is(err, os.ErrNotExist) {
+	_, err := os.Stat(szPath)
+	if errors.Is(err, os.ErrNotExist) {
 		_ = os.MkdirAll(f.ps, 0755)
-		if err = os.WriteFile(szPath, []byte(strconv.FormatInt(f.sz, 10)), 0666); err != nil {
-			return fs.ToErrno(err)
-		}
-	} else if err != nil {
+		err = os.WriteFile(szPath, []byte(strconv.FormatInt(f.sz, 10)), 0666)
+	}
+	if err != nil {
 		return fs.ToErrno(err)
 	}
 	if ns := int64(in.Size); ns < f.ptr.Size { // truncate operation
@@ -325,9 +325,6 @@ func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 		pages, err := os.ReadDir(f.pr)
 		if errors.Is(err, os.ErrNotExist) {
 			err = os.MkdirAll(f.pr, 0755)
-		}
-		if err != nil {
-			return fs.ToErrno(err)
 		}
 		for _, p := range pages {
 			pageNum, err := strconv.ParseInt(p.Name(), 10, 64)
@@ -352,21 +349,23 @@ func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 				}
 			}
 		}
-		if ns < f.tc {
-			if err := os.WriteFile(filepath.Join(f.pr, "tc"), []byte(strconv.FormatInt(ns, 10)), 0666); err != nil {
-				return fs.ToErrno(err)
+		if err == nil && ns < f.tc {
+			if err = os.WriteFile(filepath.Join(f.pr, "tc"), []byte(strconv.FormatInt(ns, 10)), 0666); err == nil {
+				f.tc = ns
 			}
-			f.tc = ns
+		}
+		if err != nil {
+			return fs.ToErrno(err)
 		}
 	}
 	f.ptr.Size = int64(in.Size)
 	bs := []byte(f.ptr.Encoded())
 	in.Size = uint64(len(bs))
 	n, err := f.LoopbackFile.Write(ctx, bs, 0)
-	if uint64(n) == in.Size && err == 0 {
+	if uint64(n) == in.Size && errors.Is(err, syscall.Errno(0)) {
 		err = f.LoopbackFile.Setattr(ctx, in, out)
 	}
-	return err
+	return fs.ToErrno(err)
 }
 
 func (f *RemoteFile) Getattr(ctx context.Context, a *fuse.AttrOut) syscall.Errno {
