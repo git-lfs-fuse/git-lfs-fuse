@@ -95,7 +95,7 @@ func (p *pageFetcher) download(ctx context.Context, w io.Writer, a action, off, 
 		resp, err = p.manifest.APIClient().DoAPIRequestWithAuth(p.remote, req)
 	}
 	if resp != nil && resp.Body != nil {
-		defer func() {
+		defer func(resp *http.Response) {
 			// Drain the body to allow connection reuse.
 			if _, copyErr := io.Copy(io.Discard, resp.Body); err != nil {
 				log.Printf("error draining response body: %+v\n", copyErr)
@@ -103,7 +103,7 @@ func (p *pageFetcher) download(ctx context.Context, w io.Writer, a action, off, 
 			if closeErr := resp.Body.Close(); closeErr != nil {
 				log.Printf("error closing response body: %+v\n", closeErr)
 			}
-		}()
+		}(resp)
 	}
 	if resp != nil && resp.StatusCode == http.StatusTooManyRequests {
 		retryAfter := resp.Header.Get("Retry-After")
@@ -136,29 +136,25 @@ func (p *pageFetcher) download(ctx context.Context, w io.Writer, a action, off, 
 
 func (p *pageFetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, off, end, size, pageNum int64) error {
 	// TODO: single flight by ptr.Oid+range and make it asyncable.
+	var err error
 	p.mu.Lock()
-	for p.lru.Size() >= p.maxPages-1 {
+	for p.lru.Size() >= p.maxPages-1 && err == nil {
 		oid, pn := p.lru.First()
 		path := filepath.Join(p.pr, oid, "shared", pn)
 		if !p.pl.TryLock(path) {
 			break
 		}
-		err := os.Remove(path)
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			p.pl.Unlock(path)
-			p.mu.Unlock()
-			return err
-		}
-		err = p.lru.Delete(oid, pn)
-		if err != nil {
-			p.pl.Unlock(path)
-			p.mu.Unlock()
-			return err
+		err = os.Remove(path)
+		if err == nil || errors.Is(err, os.ErrNotExist) {
+			err = p.lru.Delete(oid, pn)
 		}
 		p.pl.Unlock(path)
 	}
-	err := p.lru.Add(ptr.Oid, strconv.FormatInt(pageNum, 10))
+	if err == nil {
+		err = p.lru.Add(ptr.Oid, strconv.FormatInt(pageNum, 10))
+	}
 	p.mu.Unlock()
+
 	if err != nil {
 		return err
 	}
