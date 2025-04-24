@@ -153,7 +153,7 @@ func (d *doubleLRU) replayLog() error {
 	return nil
 }
 
-func (d *doubleLRU) Add(oid string, pageNum string) error {
+func (d *doubleLRU) Add(oid string, pageNum string) (err error) {
 	entry, exists := d.oidMap[oid]
 	if !exists {
 		entry = &oidEntry{pages: NewLRUList()}
@@ -162,68 +162,63 @@ func (d *doubleLRU) Add(oid string, pageNum string) error {
 	}
 	if _, exists := entry.pages.items[pageNum]; !exists {
 		if d.doLog {
-			err := logOperation(d.lruLogPath, "A", oid, pageNum)
-			if err != nil {
-				return err
-			}
+			err = logOperation(d.lruLogPath, "A", oid, pageNum)
 		}
-		entry.pages.Add(pageNum)
-		d.size++
+		if err == nil {
+			entry.pages.Add(pageNum)
+			d.size++
+		}
 	}
-	return nil
+	return err
 }
 
-func (d *doubleLRU) MoveToEnd(oid string, pageNum string) error {
-	entry, exists := d.oidMap[oid]
-	if !exists {
-		return nil
-	}
-	if _, exists := entry.pages.items[pageNum]; exists {
-		if d.doLog {
-			err := logOperation(d.lruLogPath, "M", oid, pageNum)
-			if err != nil {
-				return err
+func (d *doubleLRU) MoveToEnd(oid string, pageNum string) (err error) {
+	entry, ok := d.oidMap[oid]
+	if ok {
+		if _, exists := entry.pages.items[pageNum]; exists {
+			if d.doLog {
+				err = logOperation(d.lruLogPath, "M", oid, pageNum)
+			}
+			if err == nil {
+				entry.pages.MoveToBack(pageNum)
+				d.oidList.MoveToBack(oid)
 			}
 		}
-		entry.pages.MoveToBack(pageNum)
-		d.oidList.MoveToBack(oid)
 	}
-	return nil
+	return err
 }
 
 func (d *doubleLRU) Size() int64 {
 	return d.size
 }
 
-func (d *doubleLRU) Delete(oid string, pageNum string) error {
-	entry, exists := d.oidMap[oid]
-	if !exists {
-		return nil
-	}
-	if _, exists := entry.pages.items[pageNum]; exists {
-		if d.doLog {
-			err := logOperation(d.lruLogPath, "D", oid, pageNum)
-			if err != nil {
-				return err
+func (d *doubleLRU) Delete(oid string, pageNum string) (err error) {
+	entry, ok := d.oidMap[oid]
+	if ok {
+		if _, exists := entry.pages.items[pageNum]; exists {
+			if d.doLog {
+				err = logOperation(d.lruLogPath, "D", oid, pageNum)
+			}
+			if err == nil {
+				entry.pages.Remove(pageNum)
+				d.size--
+				if entry.pages.Len() == 0 {
+					delete(d.oidMap, oid)
+					d.oidList.Remove(oid)
+				}
 			}
 		}
-		entry.pages.Remove(pageNum)
-		d.size--
-		if entry.pages.Len() == 0 {
-			delete(d.oidMap, oid)
-			d.oidList.Remove(oid)
-		}
 	}
-	return nil
+	return err
 }
 
-func (d *doubleLRU) First() (string, string) {
-	oid, ok := d.oidList.Front()
-	if !ok {
-		return "", ""
+func (d *doubleLRU) First() (oid string, pageNum string) {
+	var ok bool
+	oid, ok = d.oidList.Front()
+	if ok {
+		entry := d.oidMap[oid]
+		pageNum, ok = entry.pages.Front()
 	}
-	entry := d.oidMap[oid]
-	pageNum, ok := entry.pages.Front()
 	if !ok {
 		return "", ""
 	}
@@ -238,8 +233,8 @@ func logOperation(lruLogPath string, op string, oid, page string) error {
 	}
 	defer f.Close()
 	_, err = fmt.Fprintf(f, "%s %s %s\n", op, oid, page)
-	if err != nil {
-		return err
+	if err == nil {
+		err = f.Sync()
 	}
-	return f.Sync()
+	return err
 }
