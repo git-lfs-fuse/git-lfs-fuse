@@ -115,11 +115,6 @@ func (n *FSNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuse
 
 	p := n.path()
 
-	ino, err := generateFid(p)
-	if err != nil {
-		return nil, 0, fs.ToErrno(err)
-	}
-
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	rf := n.rf
@@ -137,7 +132,11 @@ func (n *FSNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuse
 	flags &= ^uint32(os.O_RDONLY | os.O_WRONLY | os.O_RDWR)
 	flags |= uint32(os.O_RDWR)
 
-	f, err := syscall.Open(p, int(flags), 0)
+	var f int
+	ino, err := generateFid(p)
+	if err == nil {
+		f, err = syscall.Open(p, int(flags), 0)
+	}
 	if err != nil {
 		return nil, 0, fs.ToErrno(err)
 	}
@@ -199,10 +198,6 @@ func (n *FSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut
 
 func (n *FSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
 	p := n.path()
-	ino, err := generateFid(p)
-	if err != nil {
-		return fs.ToErrno(err)
-	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if rf := n.rf; rf != nil {
@@ -211,7 +206,11 @@ func (n *FSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrI
 	}
 	if metadata := n.Metadata.(*FSNodeData); !n.IsDir() && !metadata.Ignore && in.Size < 1024 {
 		if ptr, _ := lfs.DecodePointerFromFile(p); ptr != nil {
-			f, err := syscall.Open(p, os.O_RDWR, 0)
+			var f int
+			ino, err := generateFid(p)
+			if err == nil {
+				f, err = syscall.Open(p, os.O_RDWR, 0)
+			}
 			if err != nil {
 				return fs.ToErrno(err)
 			}
@@ -307,13 +306,10 @@ func NewGitLFSFuseRoot(rootPath string, cfg *config.Configuration, maxPages int6
 	manifest := tq.NewManifest(cfg.Filesystem(), client, "download", cfg.Remote())
 	manifest.Upgrade()
 
-	actions, err := otter.MustBuilder[string, action](10_000).
+	actions, _ := otter.MustBuilder[string, action](10_000).
 		Cost(func(key string, t action) uint32 { return 1 }).
 		WithVariableTTL().
 		Build()
-	if err != nil {
-		return nil, err
-	}
 
 	pr := filepath.Join(rootPath, ".git", "fuse")
 	if err := os.MkdirAll(pr, 0755); err != nil {
@@ -397,6 +393,7 @@ func CloneMount(remote, mountPoint string, directMount bool, gitOptions []string
 		git := exec.Command("git", "clone")
 		git.Args = append(git.Args, gitOptions...)
 		git.Args = append(git.Args, "--", remote, hid)
+		git.Stdin = os.Stdin
 		git.Stdout = os.Stdout
 		git.Stderr = os.Stderr
 		git.Env = os.Environ()
