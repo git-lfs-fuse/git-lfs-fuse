@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"strconv"
 
+	"github.com/common-nighthawk/go-figure"
 	gitlfsfuse "github.com/git-lfs-fuse/git-lfs-fuse"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -37,6 +38,7 @@ func main() {
 	mountCmd.Flags().Bool("single-branch", false, "clone only one branch, HEAD or --branch")
 	mountCmd.Flags().Bool("no-tags", false, "don't clone any tags, and make later fetches not to follow them")
 	mountCmd.Flags().Bool("shallow-submodules", false, "any cloned submodules will be shallow")
+	mountCmd.Flags().Bool("no-mount", false, "")
 	mountCmd.Flags().BoolVar(&directMount, "direct-mount", false, "try to call the mount syscall instead of executing fusermount")
 	mountCmd.Flags().Int("max-pages", 5120, "maximum cached pages. 2MiB per page.")
 	entryCmd.AddCommand(mountCmd)
@@ -56,12 +58,15 @@ func mountRun(cmd *cobra.Command, args []string) {
 	var gitOptions []string
 	var maxPages int64
 	var err error
+	var exit bool
 	cmd.Flags().Visit(func(flg *pflag.Flag) {
 		switch flg.Name {
 		case "origin", "branch", "depth":
 			gitOptions = append(gitOptions, fmt.Sprintf("--%s=%s", flg.Name, flg.Value.String()))
 		case "max-pages":
 			maxPages, err = strconv.ParseInt(flg.Value.String(), 10, 64)
+		case "no-mount":
+			exit = true
 		default:
 			gitOptions = append(gitOptions, fmt.Sprintf("--%s", flg.Name))
 		}
@@ -76,10 +81,16 @@ func mountRun(cmd *cobra.Command, args []string) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("%s is mounted at %s\nPlease keep this process running.", args[0], mnt)
+
+	myFigure := figure.NewFigure("Git LFS Fuse", "", true)
+	myFigure.Print()
+	log.Printf("Your repository is ready and mounted at %s\nPlease keep this process running.", mnt)
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)
+	if exit {
+		go func() { sig <- os.Interrupt }()
+	}
 	<-sig
 	svc.Close()
 }

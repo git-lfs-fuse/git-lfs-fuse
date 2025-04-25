@@ -5,6 +5,7 @@ go 1.23.4
 replace github.com/hanwen/go-fuse/v2 v2.7.3-0.20250116065539-aa9c5164721d => github.com/git-lfs-fuse/go-fuse/v2 v2.7.4-dev8
 
 require (
+	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be
 	github.com/git-lfs-fuse/lfs-test-server v0.5.0-dev5
 	github.com/git-lfs/git-lfs/v3 v3.6.1-0.20250114181820-a8bf08074988
 	github.com/go-git/go-git/v5 v5.15.0

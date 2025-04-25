@@ -143,3 +143,20 @@ func TestMainMount(t *testing.T) {
 
 	<-done
 }
+
+func TestNoMount(t *testing.T) {
+	repo, err := prepareRepo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	mnt, err := os.MkdirTemp("", "glf-mnt")
+	if err != nil {
+		return
+	}
+	defer os.RemoveAll(mnt)
+
+	os.Args = []string{"main", "mount", repo.repo, mnt, "--origin", "origin", "--branch", "main", "--depth", "1", "--max-pages", "0", "--no-tags", "--no-mount"}
+	main()
+}
