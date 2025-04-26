@@ -2,7 +2,6 @@ package gitlfsfuse
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -14,6 +13,7 @@ type DoubleLRU interface {
 	Size() int64
 	Delete(oid string, pageNum string) error
 	First() (string, string)
+	Close()
 }
 
 type Node struct {
@@ -95,47 +95,44 @@ type oidEntry struct {
 	pages *LRUList
 }
 type doubleLRU struct {
-	oidList    *LRUList
-	oidMap     map[string]*oidEntry
-	lruLogPath string
-	size       int64
-	doLog      bool
+	oidList   *LRUList
+	oidMap    map[string]*oidEntry
+	logFile   *os.File
+	lruLogPos int64
+	size      int64
 }
 
 func NewDoubleLRU(lruLogPath string) (DoubleLRU, error) {
 	d := &doubleLRU{
-		oidList:    NewLRUList(),
-		oidMap:     make(map[string]*oidEntry),
-		lruLogPath: lruLogPath,
-		doLog:      false,
+		oidList: NewLRUList(),
+		oidMap:  make(map[string]*oidEntry),
 	}
-	err := d.replayLog() // Restore from log
+	err := d.replayLog(lruLogPath) // Restore from log
 	if err != nil {
 		return nil, err
 	}
-	d.doLog = true
 	return d, nil
 }
 
-func (d *doubleLRU) replayLog() error {
-	file, err := os.Open(d.lruLogPath)
+func (d *doubleLRU) replayLog(lruLogPath string) error {
+	file, err := os.OpenFile(lruLogPath, os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
-		// It's okay if the file doesn't exist yet (first startup)
-		if os.IsNotExist(err) {
-			return nil
-		}
 		return err
 	}
-	defer file.Close()
 	scanner := bufio.NewScanner(file)
-	// TODO: Check whether the line is complete
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		parts := strings.Fields(line)
-		if len(parts) != 3 {
-			return errors.New("Corrupted log")
+		if len(parts) != 4 {
+			file.Close()
+			return fmt.Errorf("invalid line (%d): %q", d.lruLogPos, line)
 		}
-		op, oid, page := parts[0], parts[1], parts[2]
+		op, oid, page, end := parts[0], parts[1], parts[2], parts[3]
+		if end != "-" {
+			file.Close()
+			return fmt.Errorf("invalid line (%d): %q", d.lruLogPos, line)
+		}
 		switch op {
 		case "A":
 			_ = d.Add(oid, page)
@@ -144,12 +141,16 @@ func (d *doubleLRU) replayLog() error {
 		case "D":
 			_ = d.Delete(oid, page)
 		default:
-			return errors.New("Invald operation " + op)
+			file.Close()
+			return fmt.Errorf("invalid operation (%d): %q", d.lruLogPos, line)
 		}
+		d.lruLogPos += int64(len(line)) + 1
 	}
 	if err := scanner.Err(); err != nil {
+		file.Close()
 		return err
 	}
+	d.logFile = file
 	return nil
 }
 
@@ -161,8 +162,8 @@ func (d *doubleLRU) Add(oid string, pageNum string) (err error) {
 		d.oidList.Add(oid)
 	}
 	if _, exists := entry.pages.items[pageNum]; !exists {
-		if d.doLog {
-			err = logOperation(d.lruLogPath, "A", oid, pageNum)
+		if d.logFile != nil {
+			err = d.logOperation("A", oid, pageNum)
 		}
 		if err == nil {
 			entry.pages.Add(pageNum)
@@ -176,8 +177,8 @@ func (d *doubleLRU) MoveToEnd(oid string, pageNum string) (err error) {
 	entry, ok := d.oidMap[oid]
 	if ok {
 		if _, exists := entry.pages.items[pageNum]; exists {
-			if d.doLog {
-				err = logOperation(d.lruLogPath, "M", oid, pageNum)
+			if d.logFile != nil {
+				err = d.logOperation("M", oid, pageNum)
 			}
 			if err == nil {
 				entry.pages.MoveToBack(pageNum)
@@ -196,8 +197,8 @@ func (d *doubleLRU) Delete(oid string, pageNum string) (err error) {
 	entry, ok := d.oidMap[oid]
 	if ok {
 		if _, exists := entry.pages.items[pageNum]; exists {
-			if d.doLog {
-				err = logOperation(d.lruLogPath, "D", oid, pageNum)
+			if d.logFile != nil {
+				err = d.logOperation("D", oid, pageNum)
 			}
 			if err == nil {
 				entry.pages.Remove(pageNum)
@@ -225,16 +226,18 @@ func (d *doubleLRU) First() (oid string, pageNum string) {
 	return oid, pageNum
 }
 
-func logOperation(lruLogPath string, op string, oid, page string) error {
-	f, err := os.OpenFile(lruLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	// TODO: Check before appending
-	if err != nil {
-		return err // optional: log error
-	}
-	defer f.Close()
-	_, err = fmt.Fprintf(f, "%s %s %s\n", op, oid, page)
+func (d *doubleLRU) logOperation(op string, oid, page string) error {
+	line := fmt.Sprintf("%s %s %s -\n", op, oid, page)
+	_, err := d.logFile.WriteAt([]byte(line), d.lruLogPos)
 	if err == nil {
-		err = f.Sync()
+		err = d.logFile.Sync()
+	}
+	if err == nil {
+		d.lruLogPos += int64(len(line))
 	}
 	return err
+}
+
+func (d *doubleLRU) Close() {
+	d.logFile.Close()
 }

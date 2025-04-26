@@ -14,6 +14,7 @@ func TestNewDoubleLRU(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error from NewDoubleLRU, got: %v", err)
 	}
+	defer lru.Close()
 
 	if lru.Size() != 0 {
 		t.Errorf("New LRU should have size 0, got %d", lru.Size())
@@ -32,6 +33,7 @@ func TestAdd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error from NewDoubleLRU, got: %v", err)
 	}
+	defer lru.Close()
 
 	// Add first item
 	err = lru.Add("oid1", "page1")
@@ -82,6 +84,7 @@ func TestMoveToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error from NewDoubleLRU, got: %v", err)
 	}
+	defer lru.Close()
 
 	// Add items
 	err = lru.Add("oid1", "page1")
@@ -135,7 +138,7 @@ func TestDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error from NewDoubleLRU, got: %v", err)
 	}
-
+	defer lru.Close()
 	// Add items
 	err = lru.Add("oid1", "page1")
 	if err != nil {
@@ -204,7 +207,7 @@ func TestComplexScenario(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error from NewDoubleLRU, got: %v", err)
 	}
-
+	defer lru.Close()
 	// Add several items
 	err = lru.Add("oid1", "page1")
 	if err != nil {
@@ -308,7 +311,7 @@ func TestEvictionScenario(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error from NewDoubleLRU, got: %v", err)
 	}
-
+	defer lru.Close()
 	// Add several items
 	err = lru.Add("oid1", "page1")
 	if err != nil {
@@ -383,11 +386,11 @@ func TestLogReplay(t *testing.T) {
 
 	// Pre-fill a log file manually
 	content := strings.Join([]string{
-		"A oid1 page1",
-		"A oid1 page2",
-		"A oid2 page1",
-		"M oid1 page1",
-		"D oid1 page2",
+		"A oid1 page1 -",
+		"A oid1 page2 -",
+		"A oid2 page1 -",
+		"M oid1 page1 -",
+		"D oid1 page2 -",
 	}, "\n") + "\n" // <-- ensure final newline
 	err := os.WriteFile(logFile, []byte(content), 0644)
 	if err != nil {
@@ -398,7 +401,7 @@ func TestLogReplay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to initialize LRU from log: %v", err)
 	}
-
+	defer lru.Close()
 	if lru.Size() != 2 {
 		t.Errorf("Expected size 2 after replay, got %d", lru.Size())
 	}
@@ -413,7 +416,22 @@ func TestCorruptedLogLine(t *testing.T) {
 	logFile := "test_corrupt.log"
 	defer os.Remove(logFile)
 
-	content := "A oid1 page1\nBADLINE\n"
+	content := "A oid1 page1 -\nBADLINE\n"
+	err := os.WriteFile(logFile, []byte(content), 0644)
+	if err != nil {
+		t.Fatalf("Failed to write log file: %v", err)
+	}
+
+	_, err = NewDoubleLRU(logFile)
+	if err == nil {
+		t.Errorf("Expected error due to corrupted log line, got nil")
+	}
+}
+func TestCorruptedLogLine2(t *testing.T) {
+	logFile := "test_corrupt.log"
+	defer os.Remove(logFile)
+
+	content := "A oid1 page1 z\n" // no "-" at the end
 	err := os.WriteFile(logFile, []byte(content), 0644)
 	if err != nil {
 		t.Fatalf("Failed to write log file: %v", err)
@@ -445,64 +463,69 @@ func TestCorruptedLogLine_InvalidOperation(t *testing.T) {
 	logFile := "test_invalid_op.log"
 	defer os.Remove(logFile)
 
-	content := "X oid1 page1\n" // Invalid operation 'X'
+	content := "X oid1 page1 -\n" // Invalid operation 'X'
 	err := os.WriteFile(logFile, []byte(content), 0644)
 	if err != nil {
 		t.Fatalf("Failed to write log file: %v", err)
 	}
 
 	_, err = NewDoubleLRU(logFile)
-	if err == nil || !strings.Contains(err.Error(), "Invald operation") {
+	if err == nil || !strings.Contains(err.Error(), "invalid operation") {
 		t.Errorf("Expected error for invalid op, got: %v", err)
 	}
 }
 
 type errorScanner struct{}
 
-func (e *errorScanner) Scan() bool           { return true }
-func (e *errorScanner) Text() string         { return "A oid1 page1" }
-func (e *errorScanner) Err() error           { return errors.New("scan failed") }
+func (e *errorScanner) Scan() bool   { return true }
+func (e *errorScanner) Text() string { return "A oid1 page1" }
+func (e *errorScanner) Err() error   { return errors.New("scan failed") }
 
 func TestScannerError(t *testing.T) {
-	lru := &doubleLRU{
-		lruLogPath: "test_lru_scan.log",
-	}
+	lru := &doubleLRU{}
 
 	// Manually override replayLog to simulate scanner error
-	file, err := os.Create(lru.lruLogPath)
+	file, err := os.Create("test_lru_scan.log")
 	if err != nil {
 		t.Fatal(err)
 	}
-	file.WriteString("A oid1 page1\n")
+	file.WriteString("A oid1 page1 -\n")
 	file.Close()
 
 	// Patch bufio.NewScanner to inject an error would require major refactor.
 	// Easier fix: simulate a corrupt file (e.g., very long line)
 	corrupt := strings.Repeat("a", 10_000_000) // larger than bufio.Scanner buffer
-	err = os.WriteFile(lru.lruLogPath, []byte(corrupt), 0644)
+	err = os.WriteFile("test_lru_scan.log", []byte(corrupt), 0644)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = lru.replayLog()
+	err = lru.replayLog("test_lru_scan.log")
 	if err == nil {
 		t.Error("Expected error from scanner.Err(), got nil")
 	}
 }
 
 func TestDoubleLRU_Add_LogFail(t *testing.T) {
-    dir := t.TempDir()
-    // Intentionally use a directory as the log path to cause a write error
-    lru := &doubleLRU{
-        oidMap:     make(map[string]*oidEntry),
-        oidList:    NewLRUList(),
-        size:       0,
-        doLog:      true,
-        lruLogPath: dir, // not a file — will cause logOperation to fail
-    }
+	dir := t.TempDir()
+	// Intentionally use a directory as the log path to cause a write error
+	lru := &doubleLRU{
+		oidMap:  make(map[string]*oidEntry),
+		oidList: NewLRUList(),
+		size:    0,
+	}
+	if err := lru.replayLog(dir); err == nil {
+		t.Fatal("Expected error due to log failure, but got nil")
+	}
+	f, err := os.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	lru.logFile = f
 
-    err := lru.Add("oid1", "page1")
-    if err == nil {
-        t.Fatal("Expected error due to log failure, but got nil")
-    }
+	err = lru.Add("oid1", "page1")
+	if err == nil {
+		t.Fatal("Expected error due to log failure, but got nil")
+	}
 }
