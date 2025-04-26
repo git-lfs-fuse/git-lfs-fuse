@@ -157,6 +157,6 @@ func TestNoMount(t *testing.T) {
 	}
 	defer os.RemoveAll(mnt)
 
-	os.Args = []string{"main", "mount", repo.repo, mnt, "--origin", "origin", "--branch", "main", "--depth", "1", "--max-pages", "0", "--no-tags", "--no-mount"}
+	os.Args = []string{"main", "mount", repo.repo, mnt, "--origin", "origin", "--branch", "main", "--depth", "1", "--max-pages", "0", "--no-tags", "--no-mount", "--debug"}
 	main()
 }

@@ -3,6 +3,7 @@ package gitlfsfuse
 import (
 	"bytes"
 	"context"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -62,52 +63,78 @@ var _ = (fs.NodeListxattrer)((*FSNode)(nil))
 // TODO: we may need to implement these:
 //var _ = (fs.NodeCopyFileRanger)((*FSNode)(nil))
 
+var RecordNodeOperations = false
+
+func recording(name string, msg func() string) (ret func()) {
+	ret = func() {}
+	if RecordNodeOperations {
+		now := time.Now()
+		ret = func() {
+			elapsed := time.Since(now)
+			log.Printf("%s %dμs: %s\n", name, elapsed.Microseconds(), msg())
+		}
+	}
+	return ret
+}
+
 func (n *FSNode) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
+	defer recording("statfs", func() string { return n.path() })()
 	return n.LoopbackNode.Statfs(ctx, out)
 }
 
 func (n *FSNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	defer recording("lookup", func() string { return filepath.Join(n.path(), name) })()
 	defer n.fixAttr(&out.Attr, name)
 	return n.LoopbackNode.Lookup(ctx, name, out)
 }
 
 func (n *FSNode) Mknod(ctx context.Context, name string, mode, rdev uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	defer recording("mknod", func() string { return filepath.Join(n.path(), name) })()
 	return n.LoopbackNode.Mknod(ctx, name, mode, rdev, out)
 }
 
 func (n *FSNode) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	defer recording("mkdir", func() string { return filepath.Join(n.path(), name) })()
 	return n.LoopbackNode.Mkdir(ctx, name, mode, out)
 }
 
 func (n *FSNode) Rmdir(ctx context.Context, name string) syscall.Errno {
+	defer recording("rmdir", func() string { return filepath.Join(n.path(), name) })()
 	return n.LoopbackNode.Rmdir(ctx, name)
 }
 
 func (n *FSNode) Unlink(ctx context.Context, name string) syscall.Errno {
+	defer recording("unlink", func() string { return filepath.Join(n.path(), name) })()
 	return n.LoopbackNode.Unlink(ctx, name)
 }
 
 func (n *FSNode) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
+	defer recording("rename", func() string { return filepath.Join(n.path(), name) })()
 	return n.LoopbackNode.Rename(ctx, name, newParent, newName, flags)
 }
 
 func (n *FSNode) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (inode *fs.Inode, fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
+	defer recording("create", func() string { return filepath.Join(n.path(), name) })()
 	return n.LoopbackNode.Create(ctx, name, flags, mode, out)
 }
 
 func (n *FSNode) Symlink(ctx context.Context, target, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	defer recording("symlink", func() string { return filepath.Join(n.path(), name) })()
 	return n.LoopbackNode.Symlink(ctx, target, name, out)
 }
 
 func (n *FSNode) Link(ctx context.Context, target fs.InodeEmbedder, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	defer recording("link", func() string { return filepath.Join(n.path(), name) })()
 	return n.LoopbackNode.Link(ctx, target, name, out)
 }
 
 func (n *FSNode) Readlink(ctx context.Context) ([]byte, syscall.Errno) {
+	defer recording("readlink", func() string { return n.path() })()
 	return n.LoopbackNode.Readlink(ctx)
 }
 
 func (n *FSNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
+	defer recording("open", func() string { return n.path() })()
 	metadata := n.LoopbackNode.Metadata.(*FSNodeData)
 	if metadata.Ignore || flags&uint32(os.O_CREATE) != 0 || flags&uint32(os.O_TRUNC) != 0 {
 		return n.LoopbackNode.Open(ctx, flags)
@@ -148,22 +175,27 @@ func (n *FSNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuse
 }
 
 func (n *FSNode) Read(ctx context.Context, f fs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
+	defer recording("read", func() string { return n.path() })()
 	return f.(fs.FileReader).Read(ctx, dest, off)
 }
 
 func (n *FSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, off int64) (written uint32, errno syscall.Errno) {
+	defer recording("write", func() string { return n.path() })()
 	return f.(fs.FileWriter).Write(ctx, data, off)
 }
 
 func (n *FSNode) Fsync(ctx context.Context, f fs.FileHandle, flags uint32) syscall.Errno {
+	defer recording("fsync", func() string { return n.path() })()
 	return f.(fs.FileFsyncer).Fsync(ctx, flags)
 }
 
 func (n *FSNode) Flush(ctx context.Context, f fs.FileHandle) syscall.Errno {
+	defer recording("flush", func() string { return n.path() })()
 	return f.(fs.FileFlusher).Flush(ctx)
 }
 
 func (n *FSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
+	defer recording("release", func() string { return n.path() })()
 	if writer, ok := f.(*RemoteFile); ok {
 		n.mu.Lock()
 		defer n.mu.Unlock()
@@ -177,14 +209,17 @@ func (n *FSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 }
 
 func (n *FSNode) OpendirHandle(ctx context.Context, flags uint32) (fs.FileHandle, uint32, syscall.Errno) {
+	defer recording("opendir", func() string { return n.path() })()
 	return n.LoopbackNode.OpendirHandle(ctx, flags)
 }
 
 func (n *FSNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
+	defer recording("readdir", func() string { return n.path() })()
 	return n.LoopbackNode.Readdir(ctx)
 }
 
 func (n *FSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
+	defer recording("getattr", func() string { return n.path() })()
 	n.mu.RLock()
 	if rf := n.rf; rf != nil {
 		defer n.mu.RUnlock()
@@ -197,6 +232,7 @@ func (n *FSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut
 }
 
 func (n *FSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
+	defer recording("setattr", func() string { return n.path() })()
 	p := n.path()
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -224,18 +260,22 @@ func (n *FSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrI
 }
 
 func (n *FSNode) Getxattr(ctx context.Context, attr string, dest []byte) (uint32, syscall.Errno) {
+	defer recording("getxattr", func() string { return n.path() })()
 	return n.LoopbackNode.Getxattr(ctx, attr, dest)
 }
 
 func (n *FSNode) Setxattr(ctx context.Context, attr string, data []byte, flags uint32) syscall.Errno {
+	defer recording("setxattr", func() string { return n.path() })()
 	return n.LoopbackNode.Setxattr(ctx, attr, data, flags)
 }
 
 func (n *FSNode) Removexattr(ctx context.Context, attr string) syscall.Errno {
+	defer recording("removexattr", func() string { return n.path() })()
 	return n.LoopbackNode.Removexattr(ctx, attr)
 }
 
 func (n *FSNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscall.Errno) {
+	defer recording("listxattr", func() string { return n.path() })()
 	return n.LoopbackNode.Listxattr(ctx, dest)
 }
 
@@ -243,6 +283,7 @@ func (n *FSNode) fixAttr(out *fuse.Attr, name string) {
 	if n.IsDir() || n.Metadata.(*FSNodeData).Ignore || out.Size >= 1024 {
 		return
 	}
+	defer recording("fixAttr", func() string { return filepath.Join(n.path(), name) })()
 	if r, err := os.Open(filepath.Join(n.path(), name)); err == nil {
 		if ptr, _ := lfs.DecodePointer(r); ptr != nil {
 			// TODO: move this step to a custom smudge filter

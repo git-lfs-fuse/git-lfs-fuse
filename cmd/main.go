@@ -39,6 +39,7 @@ func main() {
 	mountCmd.Flags().Bool("no-tags", false, "don't clone any tags, and make later fetches not to follow them")
 	mountCmd.Flags().Bool("shallow-submodules", false, "any cloned submodules will be shallow")
 	mountCmd.Flags().Bool("no-mount", false, "")
+	mountCmd.Flags().Bool("debug", false, "")
 	mountCmd.Flags().BoolVar(&directMount, "direct-mount", false, "try to call the mount syscall instead of executing fusermount")
 	mountCmd.Flags().Int("max-pages", 5120, "maximum cached pages. 2MiB per page.")
 	entryCmd.AddCommand(mountCmd)
@@ -67,6 +68,8 @@ func mountRun(cmd *cobra.Command, args []string) {
 			maxPages, err = strconv.ParseInt(flg.Value.String(), 10, 64)
 		case "no-mount":
 			exit = true
+		case "debug":
+			gitlfsfuse.RecordNodeOperations = true
 		default:
 			gitOptions = append(gitOptions, fmt.Sprintf("--%s", flg.Name))
 		}

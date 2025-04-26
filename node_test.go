@@ -393,6 +393,7 @@ func TestMount(t *testing.T) {
 }
 
 func TestMountCheckout(t *testing.T) {
+	RecordNodeOperations = true
 	hid, mnt, cancel := cloneMount(t)
 	defer cancel()
 
@@ -428,6 +429,7 @@ func TestMountCheckout(t *testing.T) {
 }
 
 func TestLocalFileWrite(t *testing.T) {
+	RecordNodeOperations = true
 	hid, mnt, cancel := cloneMount(t)
 	defer cancel()
 
@@ -510,6 +512,7 @@ func TestLocalFileWrite(t *testing.T) {
 }
 
 func TestRemoteFileWrite(t *testing.T) {
+	RecordNodeOperations = true
 	hid, mnt, cancel := cloneMount(t)
 	defer cancel()
 
@@ -601,6 +604,7 @@ func TestRemoteFileWrite(t *testing.T) {
 
 // 10. As a user, I can access remote Git-LFS tracked files without storing them entirely locally by specifying the cache size.
 func TestLimitedCacheSize(t *testing.T) {
+	RecordNodeOperations = true
 	// Set a very small cache size (2 pages) to force eviction
 	smallCacheSize := int64(2)
 
@@ -663,6 +667,7 @@ func TestLimitedCacheSize(t *testing.T) {
 }
 
 func TestFsNodeOperations(t *testing.T) {
+	RecordNodeOperations = true
 	root, err := os.MkdirTemp("", "fsnode_ops")
 	if err != nil {
 		t.Fatal(err)
@@ -846,6 +851,7 @@ func TestFsNodeOperations(t *testing.T) {
 }
 
 func TestE2EFileOperation(t *testing.T) {
+	RecordNodeOperations = true
 	_, mnt, cancel := cloneMount(t)
 	defer cancel()
 
