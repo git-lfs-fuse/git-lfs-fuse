@@ -673,10 +673,11 @@ func TestFsNodeOperations(t *testing.T) {
 		t.Fatalf("git init failed: %s\n%v", out, err)
 	}
 	cfg := config.NewIn(root, "")
-	node, err := NewGitLFSFuseRoot(root, cfg, 5120)
+	node, cancel, err := NewGitLFSFuseRoot(root, cfg, 5120)
 	if err != nil {
 		t.Fatalf("NewGitLFSFuseRoot error: %v", err)
 	}
+	defer cancel()
 	fsnode := node.(*FSNode)
 
 	mnt, err := os.MkdirTemp("", "mnt")

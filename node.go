@@ -290,17 +290,17 @@ func (n *FSNode) path() string {
 	return filepath.Join(n.RootData.Path, n.Path(n.root()))
 }
 
-func NewGitLFSFuseRoot(rootPath string, cfg *config.Configuration, maxPages int64) (fs.InodeEmbedder, error) {
+func NewGitLFSFuseRoot(rootPath string, cfg *config.Configuration, maxPages int64) (fs.InodeEmbedder, func(), error) {
 	var st syscall.Stat_t
 	if err := syscall.Stat(rootPath, &st); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	gf := lfs.NewGitFilter(cfg)
 	gref := gf.RemoteRef()
 	client, err := lfsapi.NewClient(cfg)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	manifest := tq.NewManifest(cfg.Filesystem(), client, "download", cfg.Remote())
@@ -313,13 +313,13 @@ func NewGitLFSFuseRoot(rootPath string, cfg *config.Configuration, maxPages int6
 
 	pr := filepath.Join(rootPath, ".git", "fuse")
 	if err := os.MkdirAll(pr, 0755); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	lruLogPath := filepath.Join(pr, "lru.log")
+	lruLogPath := filepath.Join(pr, "lru2.log")
 	lru, err := NewDoubleLRU(lruLogPath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	pl := &plock{lk: make(map[string]*lock)}
@@ -352,11 +352,12 @@ func NewGitLFSFuseRoot(rootPath string, cfg *config.Configuration, maxPages int6
 	}
 	rootNode := root.NewNode(root, nil, "", &st)
 	root.RootNode = rootNode
-	return rootNode, nil
+	return rootNode, func() { lru.Close() }, nil
 }
 
 type Server struct {
-	svc *fuse.Server
+	svc    *fuse.Server
+	cancel func()
 }
 
 func (s *Server) Close() {
@@ -366,6 +367,7 @@ func (s *Server) Close() {
 		}
 	}()
 	s.svc.Wait()
+	s.cancel()
 }
 
 func CloneMount(remote, mountPoint string, directMount bool, gitOptions []string, maxPages int64) (string, string, *Server, error) {
@@ -414,7 +416,7 @@ func CloneMount(remote, mountPoint string, directMount bool, gitOptions []string
 	}
 
 	var server *Server
-	pxy, err := NewGitLFSFuseRoot(hid, cfg, maxPages)
+	pxy, cancel, err := NewGitLFSFuseRoot(hid, cfg, maxPages)
 	if err == nil {
 		err = os.MkdirAll(mnt, 0755)
 	}
@@ -429,7 +431,7 @@ func CloneMount(remote, mountPoint string, directMount bool, gitOptions []string
 			},
 		})
 		if err == nil {
-			server = &Server{svc: svc}
+			server = &Server{svc: svc, cancel: cancel}
 		}
 	}
 	return hid, mnt, server, err
