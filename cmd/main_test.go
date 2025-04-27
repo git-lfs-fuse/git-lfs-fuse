@@ -160,3 +160,10 @@ func TestNoMount(t *testing.T) {
 	os.Args = []string{"main", "mount", repo.repo, mnt, "--origin", "origin", "--branch", "main", "--depth", "1", "--max-pages", "0", "--no-tags", "--no-mount", "--debug"}
 	main()
 }
+
+func TestNoArg(t *testing.T) {
+	err := mountRun(mountCmd, []string{})
+	if err == nil || err.Error() != "you must specify a repository to clone" {
+		t.Fatal(err)
+	}
+}

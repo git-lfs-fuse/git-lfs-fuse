@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -15,16 +16,17 @@ import (
 
 var directMount bool
 
-func main() {
-	log.SetFlags(0)
-	var entryCmd = &cobra.Command{
-		Use: "git-lfs-fuse",
-	}
-	var mountCmd = &cobra.Command{
-		Run:   mountRun,
-		Use:   "mount <repo> [<dir>]",
-		Short: "Mount the provided remote repository locally",
-	}
+var entryCmd = &cobra.Command{
+	Use: "git-lfs-fuse",
+}
+
+var mountCmd = &cobra.Command{
+	RunE:  mountRun,
+	Use:   "mount <repo> [<dir>]",
+	Short: "Mount the provided remote repository locally",
+}
+
+func init() {
 	mountCmd.Flags().Bool("progress", false, "force progress reporting")
 	mountCmd.Flags().BoolP("no-checkout", "n", false, "don't clone shallow repository")
 	mountCmd.Flags().Bool("bare", false, "create a bare repository")
@@ -43,14 +45,11 @@ func main() {
 	mountCmd.Flags().BoolVar(&directMount, "direct-mount", false, "try to call the mount syscall instead of executing fusermount")
 	mountCmd.Flags().Int("max-pages", 5120, "maximum cached pages. 2MiB per page.")
 	entryCmd.AddCommand(mountCmd)
-	if err := entryCmd.Execute(); err != nil {
-		log.Fatal(err)
-	}
 }
 
-func mountRun(cmd *cobra.Command, args []string) {
+func mountRun(cmd *cobra.Command, args []string) error {
 	if len(args) < 1 {
-		log.Fatal("You must specify a repository to clone")
+		return errors.New("you must specify a repository to clone")
 	}
 	var mountPoint string
 	if len(args) >= 2 {
@@ -58,14 +57,13 @@ func mountRun(cmd *cobra.Command, args []string) {
 	}
 	var gitOptions []string
 	var maxPages int64
-	var err error
 	var exit bool
 	cmd.Flags().Visit(func(flg *pflag.Flag) {
 		switch flg.Name {
 		case "origin", "branch", "depth":
 			gitOptions = append(gitOptions, fmt.Sprintf("--%s=%s", flg.Name, flg.Value.String()))
-		case "max-pages":
-			maxPages, err = strconv.ParseInt(flg.Value.String(), 10, 64)
+		case "max-pages": // this is already guaranteed to be no error.
+			maxPages, _ = strconv.ParseInt(flg.Value.String(), 10, 64)
 		case "no-mount":
 			exit = true
 		case "debug":
@@ -74,26 +72,29 @@ func mountRun(cmd *cobra.Command, args []string) {
 			gitOptions = append(gitOptions, fmt.Sprintf("--%s", flg.Name))
 		}
 	})
-	if err != nil {
-		log.Fatal(err)
-	}
 	if maxPages <= 0 {
 		maxPages = 5120
 	}
 	_, mnt, svc, err := gitlfsfuse.CloneMount(args[0], mountPoint, directMount, gitOptions, maxPages)
-	if err != nil {
+	if err == nil {
+		myFigure := figure.NewFigure("Git LFS Fuse", "", true)
+		myFigure.Print()
+		log.Printf("Your repository is ready and mounted at %s\nPlease keep this process running.", mnt)
+
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, os.Interrupt)
+		if exit {
+			go func() { sig <- os.Interrupt }()
+		}
+		<-sig
+		svc.Close()
+	}
+	return err
+}
+
+func main() {
+	log.SetFlags(0)
+	if err := entryCmd.Execute(); err != nil {
 		log.Fatal(err)
 	}
-
-	myFigure := figure.NewFigure("Git LFS Fuse", "", true)
-	myFigure.Print()
-	log.Printf("Your repository is ready and mounted at %s\nPlease keep this process running.", mnt)
-
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt)
-	if exit {
-		go func() { sig <- os.Interrupt }()
-	}
-	<-sig
-	svc.Close()
 }

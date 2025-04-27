@@ -100,9 +100,7 @@ func (p *pageFetcher) download(ctx context.Context, w io.Writer, a action, off, 
 			if _, copyErr := io.Copy(io.Discard, resp.Body); err != nil {
 				log.Printf("error draining response body: %+v\n", copyErr)
 			}
-			if closeErr := resp.Body.Close(); closeErr != nil {
-				log.Printf("error closing response body: %+v\n", closeErr)
-			}
+			resp.Body.Close()
 		}(resp)
 	}
 	if resp != nil && resp.StatusCode == http.StatusTooManyRequests {
