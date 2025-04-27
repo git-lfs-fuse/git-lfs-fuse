@@ -36,7 +36,7 @@ func NewRemoteFile(ptr *lfs.Pointer, pl *plock, pf PageFetcher, pr string, ino u
 	if err != nil {
 		sz = ptr.Size
 	}
-	return &RemoteFile{ptr: ptr, pl: pl, pf: pf, ps: ps, pr: pr, tc: tc, sz: sz, Ino: ino, LoopbackFile: fs.LoopbackFile{Fd: fd}}
+	return &RemoteFile{ptr: ptr, pl: pl, pf: pf, ps: ps, pr: pr, tc: tc, sz: sz, fz: ptr.Size, Ino: ino, LoopbackFile: fs.LoopbackFile{Fd: fd}}
 }
 
 type RemoteFile struct {
@@ -47,6 +47,7 @@ type RemoteFile struct {
 	pr   string // root for pages
 	tc   int64  // keep track of truncate operations. This is persisted to the tc file.
 	sz   int64  // the original file size
+	fz   int64  // the file size since the last flush.
 	mu   sync.RWMutex
 	Ino  uint64       // inode number
 	Refs atomic.Int64 // reference count
@@ -269,30 +270,34 @@ func (f *RemoteFile) Release(ctx context.Context) syscall.Errno {
 	return f.LoopbackFile.Release(ctx)
 }
 
-func (f *RemoteFile) Flush(ctx context.Context) syscall.Errno {
+func (f *RemoteFile) Flush(ctx context.Context) (err syscall.Errno) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	var attr fuse.AttrOut
-	// TODO: can we cache the attr?
-	err := f.LoopbackFile.Getattr(ctx, &attr)
-	if err == 0 {
-		bs := []byte(f.ptr.Encoded())
-		_, err = f.LoopbackFile.Write(ctx, bs, 0)
+	if f.fz != f.ptr.Size {
+		var attr fuse.AttrOut
+		err = f.LoopbackFile.Getattr(ctx, &attr)
 		if err == 0 {
-			attrIn := &fuse.SetAttrIn{
-				SetAttrInCommon: fuse.SetAttrInCommon{
-					Size:      uint64(len(bs)),
-					Atime:     attr.Atime,
-					Mtime:     attr.Mtime,
-					Ctime:     attr.Ctime,
-					Atimensec: attr.Atimensec,
-					Mtimensec: attr.Mtimensec,
-					Ctimensec: attr.Ctimensec,
-					Mode:      attr.Mode,
-					Owner:     attr.Owner,
-				},
+			bs := []byte(f.ptr.Encoded())
+			_, err = f.LoopbackFile.Write(ctx, bs, 0)
+			if err == 0 {
+				attrIn := &fuse.SetAttrIn{
+					SetAttrInCommon: fuse.SetAttrInCommon{
+						Size:      uint64(len(bs)),
+						Atime:     attr.Atime,
+						Mtime:     attr.Mtime,
+						Ctime:     attr.Ctime,
+						Atimensec: attr.Atimensec,
+						Mtimensec: attr.Mtimensec,
+						Ctimensec: attr.Ctimensec,
+						Mode:      attr.Mode,
+						Owner:     attr.Owner,
+					},
+				}
+				err = f.LoopbackFile.Setattr(ctx, attrIn, &attr)
+				if err == 0 {
+					f.fz = f.ptr.Size
+				}
 			}
-			err = f.LoopbackFile.Setattr(ctx, attrIn, &attr)
 		}
 	}
 	return err
@@ -364,6 +369,9 @@ func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 	n, err := f.LoopbackFile.Write(ctx, bs, 0)
 	if uint64(n) == in.Size && errors.Is(err, syscall.Errno(0)) {
 		err = f.LoopbackFile.Setattr(ctx, in, out)
+		if errors.Is(err, syscall.Errno(0)) {
+			f.fz = f.ptr.Size
+		}
 	}
 	return fs.ToErrno(err)
 }
