@@ -1,8 +1,11 @@
 # git-lfs-fuse
 
+[![codecov](https://codecov.io/gh/git-lfs-fuse/git-lfs-fuse/graph/badge.svg?token=9EXOUDNEFC)](https://codecov.io/gh/git-lfs-fuse/git-lfs-fuse)
+
+
 [繁體中文](README.zh-TW.md) | [簡體中文](README.zh-CN.md)
 
-Mount remote repositories and datasets managed by Git LFS locally.
+Mount remote repositories, models and datasets managed by Git LFS locally.
 
 ## Features
 
@@ -11,30 +14,32 @@ Mount remote repositories and datasets managed by Git LFS locally.
 
 ## Getting Started
 
+### Requirements
+
+- FUSE support on your operating system (Linux, Windows WSL 2, macOS with [macFUSE](https://macfuse.github.io/) installed).
+- Git LFS installed and configured.
+
 ### Installation
 
-Download prebuilt binaries from [release page](https://github.com/git-lfs-fuse/git-lfs-fuse/releases).
+Download prebuilt binaries from the [release page](https://github.com/git-lfs-fuse/git-lfs-fuse/releases).
 
-### Mount your repository or dataset
+### Mount your repository, model or dataset
 
 ```bash
 # For example, to mount a huggingface dataset:
-git-lfs-fuse mount https://huggingface.co/datasets/nvidia/OpenCodeReasoning
+git-lfs-fuse mount https://huggingface.co/datasets/nvidia/OpenCodeReasoning --max-pages 5120
 ```
 
 ### Clean up and unmount
 
-If a user-space program crashes during a FUSE operation, or if `git-lfs-fuse` encounters an error, the FUSE module may get stuck in kernel space, preventing clean shutdown. In such cases, you may need to manually unmount the FUSE mount point:
+FUSE module may get stuck in kernel space if `git-lfs-fuse` doesn't exit gracefully. In such cases, you may need to manually unmount the FUSE mount point:
 
 ```sh
 # Linux.
 sudo fusermount3 -u <mount-dir>
+# macOS.
+sudo diskutil unmount <mount-dir>
 ```
-
-## Requirements
-
-- FUSE support on your operating system (Linux, Windows WSL 2, macOS with [macFUSE](https://macfuse.github.io/) installed).
-- Git LFS installed and configured.
 
 ## Roadmap
 
