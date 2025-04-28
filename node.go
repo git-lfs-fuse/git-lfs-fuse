@@ -1,15 +1,15 @@
 package gitlfsfuse
 
 import (
-	"bytes"
 	"context"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
+	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -79,6 +79,9 @@ func recording(name string, msg func() string) (ret func()) {
 
 func (n *FSNode) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
 	defer recording("statfs", func() string { return n.path() })()
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	fixGitIndex(n.RootData.Path)
 	return n.LoopbackNode.Statfs(ctx, out)
 }
 
@@ -286,34 +289,6 @@ func (n *FSNode) fixAttr(out *fuse.Attr, name string) {
 	defer recording("fixAttr", func() string { return filepath.Join(n.path(), name) })()
 	if r, err := os.Open(filepath.Join(n.path(), name)); err == nil {
 		if ptr, _ := lfs.DecodePointer(r); ptr != nil {
-			// TODO: move this step to a custom smudge filter
-			move := ""
-			idp := filepath.Join(n.RootData.Path, ".git", "index")
-			if f, _ := os.Open(idp); f != nil {
-				idx := index.Index{}
-				if err := index.NewDecoder(f).Decode(&idx); err == nil {
-					entry := filepath.Join(n.Path(n.root()), name)
-					i := sort.Search(len(idx.Entries), func(i int) bool {
-						return bytes.Compare([]byte(idx.Entries[i].Name), []byte(entry)) >= 0
-					})
-					if i < len(idx.Entries) && uint64(idx.Entries[i].Size) == out.Size &&
-						idx.Entries[i].CreatedAt.Equal(time.Unix(int64(out.Ctime), int64(out.Ctimensec))) &&
-						idx.Entries[i].ModifiedAt.Equal(time.Unix(int64(out.Mtime), int64(out.Mtimensec))) {
-						idx.Entries[i].Size = uint32(ptr.Size)
-						move = filepath.Join(n.RootData.Path, ".git", "index-fuse")
-						if f2, _ := os.Create(move); f2 != nil {
-							if err := index.NewEncoder(f2).Encode(&idx); err != nil {
-								move = ""
-							}
-							_ = f2.Close()
-						}
-					}
-				}
-				_ = f.Close()
-				if move != "" {
-					_ = os.Rename(move, idp)
-				}
-			}
 			out.Size = uint64(ptr.Size)
 		}
 		_ = r.Close()
@@ -411,6 +386,65 @@ func (s *Server) Close() {
 	s.cancel()
 }
 
+func fixGitIndex(dir string) {
+	defer recording("fixindex", func() string { return "" })()
+	idp := filepath.Join(dir, ".git", "index")
+	if f, _ := os.Open(idp); f != nil {
+		idx := index.Index{}
+		var md int64 = 0
+		if err := index.NewDecoder(f).Decode(&idx); err == nil {
+			var ei int64 = -1
+			var wg sync.WaitGroup
+			wg.Add(runtime.NumCPU())
+			for i := 0; i < runtime.NumCPU(); i++ {
+				go func(idx index.Index) {
+					defer wg.Done()
+					for {
+						e := atomic.AddInt64(&ei, 1)
+						if e >= int64(len(idx.Entries)) {
+							break
+						}
+						entry := idx.Entries[e]
+						if entry.Size < 1024 {
+							p := filepath.Join(dir, entry.Name)
+							s, _ := os.Lstat(p)
+							if s != nil {
+								ptr, _ := lfs.DecodePointerFromFile(p)
+								if ptr != nil {
+									notModified := s.ModTime().Unix() == entry.ModifiedAt.Unix()
+									if notModified && idx.Entries[e].Size != uint32(ptr.Size) {
+										idx.Entries[e].Size = uint32(ptr.Size)
+										atomic.StoreInt64(&md, 1)
+									}
+									if idx.Entries[e].SkipWorktree != notModified {
+										idx.Entries[e].SkipWorktree = notModified
+										atomic.StoreInt64(&md, 1)
+									}
+								}
+							}
+						}
+					}
+				}(idx)
+			}
+			wg.Wait()
+		}
+		f.Close()
+		if atomic.LoadInt64(&md) > 0 {
+			move := filepath.Join(dir, ".git", "index-fuse")
+			if f2, _ := os.Create(move); f2 != nil {
+				if err := index.NewEncoder(f2).Encode(&idx); err != nil {
+					move = ""
+				}
+				_ = f2.Close()
+			}
+			if move != "" {
+				_ = os.Rename(move, idp)
+			}
+		}
+	}
+	return
+}
+
 func CloneMount(remote, mountPoint string, directMount bool, gitOptions []string, maxPages int64) (string, string, *Server, error) {
 	dst := strings.TrimSuffix(filepath.Base(remote), ".git")
 	dir, err := filepath.Abs(".")
@@ -455,6 +489,8 @@ func CloneMount(remote, mountPoint string, directMount bool, gitOptions []string
 			return "", "", nil, err
 		}
 	}
+
+	fixGitIndex(hid)
 
 	var server *Server
 	pxy, cancel, err := NewGitLFSFuseRoot(hid, cfg, maxPages)
