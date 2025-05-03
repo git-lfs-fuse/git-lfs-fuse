@@ -126,7 +126,7 @@ func pipe(f *RemoteFile, w io.Writer, buf, beg, end int64) (err error) {
 }
 
 func TestRemoteFile_Read(t *testing.T) {
-	f, cancel := createRandomRemoteFile(testsize)
+	f, cancel := createRandomRemoteFile(testsize + 8)
 	defer cancel()
 
 	o := sha256.New()
@@ -135,6 +135,19 @@ func TestRemoteFile_Read(t *testing.T) {
 	}
 	if hex.EncodeToString(o.Sum(nil)) != f.ptr.Oid {
 		t.Fatalf("oid mismatch")
+	}
+	entries, err := os.ReadDir(f.pr)
+	if err != nil {
+		t.Fatalf("ReadDir error: %v", err)
+	}
+	for _, e := range entries {
+		s, err := os.Lstat(filepath.Join(f.pr, e.Name()))
+		if err != nil {
+			t.Fatalf("Lstat error: %v", err)
+		}
+		if s.Mode()&os.ModeSymlink == 0 {
+			t.Fatalf("not a symlink: %v", e.Name())
+		}
 	}
 }
 

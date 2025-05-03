@@ -174,7 +174,7 @@ func (f *RemoteFile) getPage(ctx context.Context, off, preload int64) (*os.File,
 		} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, 0, 0, err
 		}
-		if pageEnd <= f.tc {
+		if pageEnd <= f.tc || (pageOff < f.tc && f.sz == f.tc && f.ptr.Size == f.sz) {
 			page, err = os.OpenFile(pagePth, os.O_RDWR, 0666)
 		} else {
 			page, err = replaceLinkFile(pagePth)
