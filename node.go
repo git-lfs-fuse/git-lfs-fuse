@@ -223,7 +223,6 @@ func (n *FSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut
 	n.mu.RLock()
 	if rf := n.rf; rf != nil {
 		defer n.mu.RUnlock()
-		defer n.fixAttr(&out.Attr, "")
 		return rf.Getattr(ctx, out)
 	}
 	n.mu.RUnlock()
@@ -237,7 +236,6 @@ func (n *FSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrI
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if rf := n.rf; rf != nil {
-		defer n.fixAttr(&out.Attr, "")
 		return rf.Setattr(ctx, in, out)
 	}
 	if metadata := n.Metadata.(*FSNodeData); !n.IsDir() && !metadata.Ignore && in.Size < 1024 {
@@ -252,7 +250,6 @@ func (n *FSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrI
 			}
 			defer syscall.Close(f)
 			rf := metadata.NewRemoteFile(ptr, ino, f)
-			defer n.fixAttr(&out.Attr, "")
 			return rf.Setattr(ctx, in, out)
 		}
 	}
@@ -280,7 +277,7 @@ func (n *FSNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscall.Er
 }
 
 func (n *FSNode) fixAttr(out *fuse.Attr, name string) {
-	if n.IsDir() || n.Metadata.(*FSNodeData).Ignore || out.Size >= 1024 {
+	if (name == "" && n.IsDir()) || n.Metadata.(*FSNodeData).Ignore || out.Size >= 1024 {
 		return
 	}
 	defer recording("fixAttr", func() string { return filepath.Join(n.path(), name) })()
