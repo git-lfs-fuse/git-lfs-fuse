@@ -287,10 +287,10 @@ func cloneMountWithCacheSize(t *testing.T, maxPage int64, middleware mux.Middlew
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = run(repo, "git", "config", "user.email", "testuser@example.com"); err != nil {
+	if _, err = run(hid, "git", "config", "user.email", "testuser@example.com"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = run(repo, "git", "config", "user.name", "testuser"); err != nil {
+	if _, err = run(hid, "git", "config", "user.name", "testuser"); err != nil {
 		t.Fatal(err)
 	}
 	return
@@ -531,13 +531,13 @@ func TestRemoteFileWrite(t *testing.T) {
 		t.Fatalf("mnt file content mismatch: got %q, want %q", mntContent, newContent)
 	}
 
-	// create new remote file
+	// create a new remote file
 	newFilePath := filepath.Join(mnt, "emptylarge3.bin")
 	f, err := os.Create(newFilePath)
 	if err != nil {
-		return
+		t.Fatalf("create new file error: %v", err)
 	}
-	defer f.Close()
+	f.Close()
 
 	if _, err := run(mnt, "git", "add", "emptylarge.bin"); err != nil {
 		t.Fatalf("git add error: %v", err)
