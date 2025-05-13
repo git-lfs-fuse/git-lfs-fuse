@@ -23,9 +23,14 @@ jobs:
     - name: Run tests with coverage
       run: go test -v -coverprofile=coverage.out ./...
 
+    - uses: qltysh/qlty-action/coverage@v1
+      with:
+        token: ${{ secrets.QLTY_COVERAGE_TOKEN }}
+        files: ./coverage.out
+
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v5.4.2
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ./coverage.out
-        fail_ci_if_error: true 
+        fail_ci_if_error: true
