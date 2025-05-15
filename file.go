@@ -136,7 +136,7 @@ func (f *RemoteFile) getPage(ctx context.Context, off, preload int64) (*os.File,
 		}
 
 		if preload--; preload > 0 {
-			totalPages := (f.sz + pagesize - 1) / pagesize
+			totalPages := max((f.sz+pagesize-1)/pagesize, 1)
 			preloadPage := (pageNum + 1) % totalPages
 			go func(off, preload int64) {
 				p, _, _, _ := f.getPage(context.Background(), off, preload)
