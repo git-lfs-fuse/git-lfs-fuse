@@ -398,6 +398,7 @@ func NewGitLFSFuseRoot(rootPath string, cfg *config.Configuration, maxPages int6
 		manifest:  manifest,
 		pl:        pl,
 		pr:        pr,
+		po:        filepath.Join(rootPath, ".git", "lfs", "objects"),
 		lru:       lru,
 		maxPages:  maxPages,
 	}
