@@ -37,7 +37,8 @@ type pageFetcher struct {
 	remoteRef *git.Ref
 	pl        *plock
 	remote    string
-	pr        string
+	pr        string // .git/fuse
+	po        string // .git/lfs/objects
 	maxPages  int64
 	mu        sync.Mutex
 }
@@ -155,6 +156,21 @@ func (p *pageFetcher) Fetch(ctx context.Context, w io.Writer, ptr *lfs.Pointer, 
 
 	if err != nil {
 		return err
+	}
+
+	// check .git/lfs/objects before downloading from the remote.
+	if len(ptr.Oid) > 4 {
+		path := filepath.Join(p.po, ptr.Oid[:2], ptr.Oid[2:4], ptr.Oid)
+		if _, err := os.Lstat(path); err == nil {
+			if f, _ := os.Open(path); f != nil {
+				defer f.Close()
+				if _, err := f.Seek(off, io.SeekStart); err == nil {
+					_, err = io.CopyN(w, f, end-off)
+					log.Printf("local: oid=(%s) %dMB %d/%d err=%v", ptr.Oid, pagesize/(1024*1024), pageNum+1, (size+pagesize-1)/pagesize, err)
+					return err
+				}
+			}
+		}
 	}
 
 	a, err := p.getAction(ctx, ptr.Oid, size)

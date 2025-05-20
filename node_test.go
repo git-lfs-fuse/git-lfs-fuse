@@ -448,7 +448,7 @@ func TestLocalFileWrite(t *testing.T) {
 		t.Fatalf("mnt file content mismatch: got %q, want %q", mntContent, newContent)
 	}
 
-	// create new local file
+	// create a new local file
 	newFilePath := filepath.Join(mnt, "normal3.txt")
 	f, err := os.Create(newFilePath)
 	if err != nil {
@@ -552,10 +552,6 @@ func TestRemoteFileWrite(t *testing.T) {
 		t.Fatalf("git commit error: %v", err)
 	}
 
-	if _, err := run(mnt, "git", "push", "-u", "origin", "main"); err != nil {
-		t.Fatalf("git push error: %v", err)
-	}
-
 	// checkout back to the original branch (main) to refresh the new pointer files
 	if _, err := run(mnt, "git", "checkout", "-f", "branch2"); err != nil {
 		t.Fatal(err)
@@ -566,6 +562,10 @@ func TestRemoteFileWrite(t *testing.T) {
 
 	_ = verifyRemoteFile(t, hid, mnt, "emptylarge.bin")
 	_ = verifyRemoteFile(t, hid, mnt, "emptylarge3.bin")
+
+	if _, err := run(mnt, "git", "push", "-u", "origin", "main"); err != nil {
+		t.Fatalf("git push error: %v", err)
+	}
 
 	// Clone the remote repository to verify the pushed content.
 	cloneDir, err := os.MkdirTemp("", "remote-check")
