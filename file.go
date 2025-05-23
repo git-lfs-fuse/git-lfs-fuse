@@ -309,6 +309,7 @@ func (f *RemoteFile) Fsync(ctx context.Context, flags uint32) (errno syscall.Err
 
 func (f *RemoteFile) fixAttr(out *fuse.AttrOut) {
 	out.Size = uint64(f.ptr.Size)
+	out.Blocks = uint64(f.ptr.Size+511) / 512
 }
 
 func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {

@@ -287,6 +287,7 @@ func (n *FSNode) fixAttr(out *fuse.Attr, name string) {
 	if r, err := os.Open(filepath.Join(n.path(), name)); err == nil {
 		if ptr, _ := lfs.DecodePointer(r); ptr != nil {
 			out.Size = uint64(ptr.Size)
+			out.Blocks = uint64(ptr.Size+511) / 512
 		}
 		_ = r.Close()
 	}
