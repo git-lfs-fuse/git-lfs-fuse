@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 
 	lts "github.com/git-lfs-fuse/lfs-test-server"
@@ -881,4 +882,35 @@ func TestE2EFileOperation(t *testing.T) {
 			t.Fatalf("file content mismatch: got %q, want %q", out, "new content")
 		}
 	})
+}
+
+func TestBlockSize(t *testing.T) {
+	RecordNodeOperations = true
+	_, mnt, cancel := cloneMount(t)
+	defer cancel()
+
+	target := filepath.Join(mnt, "emptylarge.bin")
+
+	fi, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("failed to stat file: %v", err)
+	}
+
+	size := fi.Size()
+	wantBlockSize := int64(size+511) / 512
+	sys := fi.Sys().(*syscall.Stat_t)
+	gotBlocks := int64(sys.Blocks)
+	if wantBlockSize != gotBlocks {
+		t.Fatalf("block size mismatch: got %d, want %d. size = %d", gotBlocks, wantBlockSize, size)
+	}
+
+	_, _ = os.ReadFile(target)
+	fi2, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("failed to stat file: %v", err)
+	}
+	sys2 := fi2.Sys().(*syscall.Stat_t)
+	if wantBlockSize != int64(sys2.Blocks) {
+		t.Fatalf("block size mismatch after read: got %d, want %d. size = %d", sys2.Blocks, wantBlockSize, size)
+	}
 }
