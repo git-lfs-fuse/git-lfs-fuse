@@ -179,8 +179,9 @@ func (f *RemoteFile) getPage(ctx context.Context, off, preload int64) (*os.File,
 		} else {
 			page, err = replaceLinkFile(pagePth)
 			if err == nil {
-				err = page.Truncate(max(f.tc-pageOff, 0))
-				err = page.Truncate(pagesize)
+				if err = page.Truncate(max(f.tc-pageOff, 0)); err == nil {
+					err = page.Truncate(pagesize)
+				}
 				if err != nil {
 					_ = page.Close()
 					_ = os.Remove(pagePth)
@@ -345,8 +346,9 @@ func (f *RemoteFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 			} else if pn := ns / pagesize; pn == pageNum {
 				page, err := replaceLinkFile(path)
 				if err == nil {
-					err = page.Truncate(ns - pn*pagesize)
-					err = page.Truncate(pagesize) // keep the page in the same size.
+					if err = page.Truncate(ns - pn*pagesize); err == nil {
+						err = page.Truncate(pagesize) // keep the page in the same size.
+					}
 					_ = page.Close()
 				}
 				if err != nil {
