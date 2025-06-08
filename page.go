@@ -98,7 +98,7 @@ func (p *pageFetcher) download(ctx context.Context, w io.Writer, a action, off, 
 	if resp != nil && resp.Body != nil {
 		defer func(resp *http.Response) {
 			// Drain the body to allow connection reuse.
-			if _, copyErr := io.Copy(io.Discard, resp.Body); err != nil {
+			if _, copyErr := io.Copy(io.Discard, resp.Body); copyErr != nil {
 				log.Printf("error draining response body: %+v\n", copyErr)
 			}
 			resp.Body.Close()
