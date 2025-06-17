@@ -297,14 +297,14 @@ func fixGitIndex(dir string) {
 	defer recording("fixindex", func() string { return "" })()
 	idp := filepath.Join(dir, ".git", "index")
 	if f, _ := os.Open(idp); f != nil {
-		idx := index.Index{}
+		idx := &index.Index{}
 		var md int64 = 0
-		if err := index.NewDecoder(f).Decode(&idx); err == nil {
+		if err := index.NewDecoder(f).Decode(idx); err == nil {
 			var ei int64 = -1
 			var wg sync.WaitGroup
 			wg.Add(runtime.NumCPU())
 			for i := 0; i < runtime.NumCPU(); i++ {
-				go func(idx index.Index) {
+				go func() {
 					defer wg.Done()
 					for {
 						e := atomic.AddInt64(&ei, 1)
@@ -327,7 +327,7 @@ func fixGitIndex(dir string) {
 							}
 						}
 					}
-				}(idx)
+				}()
 			}
 			wg.Wait()
 		}
@@ -336,7 +336,7 @@ func fixGitIndex(dir string) {
 			time.Sleep(time.Second) // avoid the git "is_racy_timestamp" check
 			move := filepath.Join(dir, ".git", "index-fuse")
 			if f2, _ := os.Create(move); f2 != nil {
-				err := index.NewEncoder(f2).Encode(&idx)
+				err := index.NewEncoder(f2).Encode(idx)
 				_ = f2.Close()
 				if err == nil {
 					_ = os.Rename(move, idp)
