@@ -23,7 +23,7 @@ Mount remote repositories, models and datasets managed by Git LFS locally.
 
 Download prebuilt binaries from the [release page](https://github.com/git-lfs-fuse/git-lfs-fuse/releases).
 
-### Mount your repository, model or dataset
+### Mount your repository, model, or dataset
 
 ```bash
 # For example, to mount a huggingface dataset:
