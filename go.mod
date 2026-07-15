@@ -1,6 +1,6 @@
 module github.com/git-lfs-fuse/git-lfs-fuse
 
-go 1.23.4
+go 1.25.0
 
 replace github.com/hanwen/go-fuse/v2 v2.7.3-0.20250116065539-aa9c5164721d => github.com/git-lfs-fuse/go-fuse/v2 v2.7.4-dev8
 
@@ -44,8 +44,8 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/rubyist/tracerx v0.0.0-20170927163412-787959303086 // indirect
 	github.com/ssgelm/cookiejarparser v1.0.1 // indirect
-	golang.org/x/crypto v0.37.0 // indirect
-	golang.org/x/net v0.39.0 // indirect
-	golang.org/x/sys v0.32.0 // indirect
-	golang.org/x/text v0.24.0 // indirect
+	golang.org/x/crypto v0.52.0 // indirect
+	golang.org/x/net v0.54.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 )
